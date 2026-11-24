@@ -1,1 +1,1 @@
-PASS: 106 checks. Procedural pixel rendering, 3 sanctums, bounded enemies, measured Georgia menus, story gating, boss phases, combo, hazards, flasks, full combat run, fantasy audio, fullscreen-ready native window and custom cursor.
+PASS: 127 checks. Procedural pixel rendering, 3 sanctums, distinct epilogue, volume sliders, player fireballs, dash grace, bounded enemies, measured Georgia menus, story gating, boss phases, combo, hazards, flasks, full combat run, per-room dark-fantasy audio, fullscreen-ready native window and custom cursor.

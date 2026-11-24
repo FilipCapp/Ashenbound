@@ -1,7 +1,7 @@
 using System;
 using System.Drawing;
 namespace Ashenbound {
-public enum Stage { Title, Story, Playing, Upgrade, Paused, Help, Dead, Won }
+public enum Stage { Title, Story, Playing, Upgrade, Paused, Help, Audio, Dead, Won }
 public struct V {
  public float X,Y;
  public V(float x,float y){X=x;Y=y;}
@@ -18,6 +18,7 @@ public struct V {
    new RectangleF(740,382,430,62),new RectangleF(740,454,430,62)
   };
   public static readonly RectangleF[] Story={new RectangleF(760,586,270,54)};
+   public static readonly RectangleF[] Epilogue={new RectangleF(450,604,380,50)};
   public static readonly RectangleF[] Upgrade={
    new RectangleF(250,270,780,96),new RectangleF(250,382,780,96),new RectangleF(250,494,780,96)
   };
@@ -26,6 +27,10 @@ public struct V {
    new RectangleF(430,420,420,58),new RectangleF(430,484,420,58)
   };
   public static readonly RectangleF[] Help={new RectangleF(520,558,240,52)};
+  public static readonly RectangleF[] Audio={
+   new RectangleF(320,262,640,60),new RectangleF(320,340,640,60),
+   new RectangleF(320,418,640,60),new RectangleF(520,518,240,52)
+  };
   public static readonly RectangleF[] End={
    new RectangleF(430,396,420,58),new RectangleF(430,464,420,58)
   };
@@ -35,11 +40,17 @@ public struct V {
    if(state==Stage.Upgrade)return Upgrade;
    if(state==Stage.Paused)return Pause;
    if(state==Stage.Help)return Help;
+   if(state==Stage.Audio)return Audio;
    if(state==Stage.Dead||state==Stage.Won)return End;
    return None;
   }
-  public static int Hit(Stage state,V point){
-   RectangleF[] items=Items(state);
+  public static RectangleF[] Items(Stage state,bool ending){
+   if(state==Stage.Story&&ending)return Epilogue;
+   return Items(state);
+  }
+  public static int Hit(Stage state,V point){return Hit(state,point,false);}
+  public static int Hit(Stage state,V point,bool ending){
+   RectangleF[] items=Items(state,ending);
    for(int i=0;i<items.Length;i++)if(items[i].Contains(point.X,point.Y))return i;
    return -1;
   }

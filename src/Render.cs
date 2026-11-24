@@ -70,8 +70,9 @@ public sealed class Renderer : IDisposable {
   if(game.State==Stage.Story)StoryPage();
   else if(game.State==Stage.Upgrade)Upgrades();
   else if(game.State==Stage.Paused)Pause();
-  else if(game.State==Stage.Help)Help();
-  else if(game.State==Stage.Won||game.State==Stage.Dead)End();
+   else if(game.State==Stage.Help)Help();
+   else if(game.State==Stage.Audio)AudioSettings();
+   else if(game.State==Stage.Won||game.State==Stage.Dead)End();
   CursorMark();
  }
  void World(){
@@ -100,15 +101,25 @@ public sealed class Renderer : IDisposable {
    Bold("E",1198,534,32,Color.White);
   }
   foreach(Enemy e in game.Enemies)EnemyDraw(e);
-  foreach(Bullet b in game.Bullets){
-   if(b.Kind==1){Circle(b.P.X,b.P.Y,8,Palette.Ember);Circle(b.P.X,b.P.Y,4,Palette.Gold);continue;}
-   Color c=b.Hostile?Palette.Blood:Palette.Gold;
-   if(b.Hostile){Circle(b.P.X,b.P.Y,9,Color.FromArgb(48,c));Circle(b.P.X,b.P.Y,5,c);Circle(b.P.X,b.P.Y,2,Color.White);}
-   else{V trail=b.P-b.Velocity.Unit*17;Line(trail.X,trail.Y,b.P.X,b.P.Y,c,4);Circle(b.P.X,b.P.Y,3,Color.White);}
+   foreach(Bullet b in game.Bullets){
+    if(b.Kind==1){Circle(b.P.X,b.P.Y,8,Palette.Ember);Circle(b.P.X,b.P.Y,4,Palette.Gold);continue;}
+    if(!b.Hostile&&b.Kind==0){Fireball(b);continue;}
+    Circle(b.P.X,b.P.Y,9,Color.FromArgb(48,Palette.Blood));Circle(b.P.X,b.P.Y,5,Palette.Blood);Circle(b.P.X,b.P.Y,2,Color.White);
+   }
+   foreach(Particle p in game.Particles)Box(p.P.X,p.P.Y,4,4,Color.FromArgb((int)(255*Game.Clamp(p.Life/p.Max,0,1)),p.Color));
+   if(game.Invulnerable<=0||((int)(clock*24))%2==0)Actor(game.Player,game.Aim,1,0);
   }
-  foreach(Particle p in game.Particles)Box(p.P.X,p.P.Y,4,4,Color.FromArgb((int)(255*Game.Clamp(p.Life/p.Max,0,1)),p.Color));
-  if(game.Invulnerable<=0||((int)(clock*24))%2==0)Actor(game.Player,game.Aim,1,0);
- }
+  void Fireball(Bullet b){
+   V dir=b.Velocity.Unit;float flicker=(float)Math.Sin(clock*38+b.P.X*.11f)*1.5f;
+   Circle(b.P.X,b.P.Y,11+flicker,Color.FromArgb(58,196,58,22));
+   Circle(b.P.X,b.P.Y,8+flicker*.4f,Palette.Ember);
+   for(int i=1;i<=3;i++){
+    V p=b.P-dir*(8+i*7)+new V((float)Math.Sin(clock*22+i)*2,(float)Math.Cos(clock*19+i)*2);
+    Circle(p.X,p.Y,5-i,Color.FromArgb(210-i*45,255,139,74));
+   }
+   Circle(b.P.X-dir.X*4,b.P.Y-dir.Y*4,5,Palette.Gold);
+   Circle(b.P.X+dir.X*2,b.P.Y+dir.Y*2,2,Color.White);
+  }
   void Actor(V p,V aim,float size,int type){
   int frame=game.State==Stage.Playing&&Math.Abs(game.Velocity.X)>10?(int)(clock*9)%2:0;
   pixels.Sprite(g,type,p,size,aim.X<0,frame);
@@ -207,9 +218,9 @@ public sealed class Renderer : IDisposable {
    RectangleF[] items=MenuLayout.Title;
    MenuItem("NEW VIGIL","ENTER",items[0],0);
    MenuItem("FIELD MANUAL","",items[1],1);
-   MenuItem(game.SoundOn?"SOUND ON":"SOUND OFF","M",items[2],2);
-   MenuItem("RETURN TO DESKTOP","",items[3],3);
-   ContextFooter("W/S SELECT   ENTER CONFIRM   M SOUND   F11 FULLSCREEN   F8 MOTION");
+    MenuItem("AUDIO SETTINGS","",items[2],2);
+    MenuItem("RETURN TO DESKTOP","",items[3],3);
+    ContextFooter("W/S SELECT   ENTER CONFIRM   M MUTE   F11 FULLSCREEN   F8 MOTION");
   }
   void Hud(){
   Box(0,0,Game.Width,88,Color.FromArgb(245,9,10,20));
@@ -234,15 +245,37 @@ public sealed class Renderer : IDisposable {
   }
   Footer();
  }
-  void StoryPage(){
-   Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
-   Frame(248,124,784,526,Palette.Gold);
-   Header("SANCTUM "+(game.Room+1)+" / "+Campaign.TotalRooms,"THE LAST CINDER",Campaign.Speakers[Math.Min(game.Room,3)],294,152);
-    Sparks(248,300,784,260);
-    TextWrap(Campaign.Scenes[Math.Min(game.Room,3)],298,276,724,17,24,Color.FromArgb(214,214,216));
-    MenuItem("CONTINUE","ENTER",MenuLayout.Story[0],0);
-   ContextFooter("ENTER / CLICK TO CONTINUE   J REOPENS THE PAGE IN PLAY");
-  }
+   void StoryPage(){
+    if(game.Ending){EpiloguePage();return;}
+    Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
+    Frame(248,124,784,526,Palette.Gold);
+    Header("SANCTUM "+(game.Room+1)+" / "+Campaign.TotalRooms,"THE LAST CINDER",Campaign.Speakers[Math.Min(game.Room,3)],294,152);
+     Sparks(248,300,784,260);
+     TextWrap(Campaign.Scenes[Math.Min(game.Room,3)],298,276,724,17,24,Color.FromArgb(214,214,216));
+     MenuItem("CONTINUE","ENTER",MenuLayout.Story[0],0);
+    ContextFooter("ENTER / CLICK TO CONTINUE   J REOPENS THE PAGE IN PLAY");
+   }
+   void EpiloguePage(){
+    Box(0,88,Game.Width,632,Color.FromArgb(242,7,7,15));
+    Frame(210,124,860,526,Palette.Gold);
+    Header("VIGIL COMPLETE","ONE MORE MORNING","The Cinder has left Veyra's hands.",254,150);
+    Sparks(250,300,780,150);
+    Circle(640,338,98,Color.FromArgb(22,255,205,116));
+    Circle(640,338,66,Color.FromArgb(32,255,139,74));
+    Box(370,370,540,3,Palette.Gold);
+    for(int i=0;i<9;i++){
+     float x=400+i*60;float y=356-(float)Math.Sin(i/8f*Math.PI)*34;
+     Box(x,y,3,44-(int)(i/3f)*8,Color.FromArgb(180-i*12,255,205,116));
+    }
+    Bold("THE BISHOP BREAKS",270,398,19,Palette.Gold);
+    TextWrap("A dried host. A silenced choir. The long dusk loses its voice.",270,430,220,15,22,Palette.Ash);
+    Bold("THE CINDER FLIES",530,398,19,Palette.Gold);
+    TextWrap("It rises through the vaulted dark and takes flight beyond the nave.",530,430,220,15,22,Palette.Ash);
+    Bold("ONE MORE MORNING",790,398,19,Palette.Gold);
+    TextWrap("First a red line, then a river. Veyra carries the rest.",790,430,220,15,22,Palette.Ash);
+    MenuItem("WITNESS THE DAWN","ENTER",MenuLayout.Epilogue[0],0);
+    ContextFooter("ENTER / CLICK TO SEE THE VICTORY RECORD");
+   }
   void Upgrades(){
    Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
    Frame(220,132,840,500,Palette.Ember);
@@ -258,10 +291,10 @@ public sealed class Renderer : IDisposable {
    Header("TIME SUSPENDED","THE ASH HOLDS STILL","Take a breath. The choir can wait.",406,170);
    RectangleF[] items=MenuLayout.Pause;
    MenuItem("RESUME VIGIL","ESC",items[0],0);
-   MenuItem("FIELD MANUAL","",items[1],1);
-   MenuItem(game.SoundOn?"SOUND ON":"SOUND OFF","M",items[2],2);
-   MenuItem("RETURN TO TITLE","",items[3],3);
-   ContextFooter("W/S SELECT   ENTER CONFIRM   ESC RESUME");
+    MenuItem("FIELD MANUAL","",items[1],1);
+    MenuItem("AUDIO SETTINGS","",items[2],2);
+    MenuItem("RETURN TO TITLE","",items[3],3);
+    ContextFooter("W/S SELECT   ENTER CONFIRM   ESC RESUME   M MUTE");
   }
   void Help(){
    Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
@@ -284,8 +317,30 @@ public sealed class Renderer : IDisposable {
    MenuItem("BACK","ESC",MenuLayout.Help[0],0);
    ContextFooter("ESC / ENTER TO RETURN");
   }
-  void End(){
-   bool won=game.State==Stage.Won;
+   void Slider(string label,float value,RectangleF r,int index){
+    bool active=game.Menu==index||r.Contains(game.Input.Aim.X,game.Input.Aim.Y);
+    Box(r.X,r.Y,r.Width,r.Height,Color.FromArgb(active?62:24,18,18,30));
+    Box(r.X,r.Y,r.Width,2,active?Palette.Gold:Color.FromArgb(90,255,139,74));
+    Box(r.X,r.Y,5,r.Height,active?Palette.Gold:Palette.Ember);
+    Bold(label,r.X+22,r.Y+16,20,active?Color.White:Palette.Ash);
+    float barX=r.X+190,barY=r.Y+24,barW=r.Width-300;
+    Box(barX,barY,barW,10,Color.FromArgb(70,34,45));
+    Box(barX,barY,barW*value,10,active?Palette.Gold:Palette.Ember);
+    for(int i=0;i<=10;i++)Box(barX+barW*i/10-1,barY-3,2,16,Color.FromArgb(70,12,12,18));
+    TextRight(Math.Round(value*100)+"%",r.Right-24,r.Y+20,17,active?Palette.Gold:Palette.Muted);
+   }
+   void AudioSettings(){
+    Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
+    Frame(250,130,780,470,Palette.Gold);
+    Header("AUDIO RITES","TUNE THE ASH","Master, music, and effects.",296,148);
+    Slider("MASTER",game.Volume[Game.MasterVolumeIndex],MenuLayout.Audio[0],0);
+    Slider("MUSIC",game.Volume[Game.MusicVolumeIndex],MenuLayout.Audio[1],1);
+    Slider("EFFECTS",game.Volume[Game.SfxVolumeIndex],MenuLayout.Audio[2],2);
+    MenuItem("BACK","ESC",MenuLayout.Audio[3],3);
+    ContextFooter("A/D ADJUST   W/S SELECT   ENTER / ESC BACK   M MUTE");
+   }
+   void End(){
+    bool won=game.State==Stage.Won;
    Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
    Frame(300,160,680,410,won?Palette.Gold:Palette.Blood);
    Header(won?"VIGIL COMPLETE":"VIGIL ENDED",won?"DAWN RETURNS":"THE DUSK KEEPS YOU",won?"The Cinder takes flight. A thin red line becomes a river.":"The choir keeps the night. Another bearer will answer.",346,190);

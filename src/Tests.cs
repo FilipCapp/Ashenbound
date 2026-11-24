@@ -66,11 +66,12 @@ public static class Tests {
    g.Input.Down=true;Steps(g,55);g.Input.Down=false;
    Check(g.Player.Y==Game.Floor-24,"drop through ledge");
 
-   g=Fresh();g.Invulnerable=0;g.Input.Dash=true;g.Step(1f/120);
-   Check(g.DashCooldown>1&&g.Invulnerable>0,"dash grants invulnerability");
-   float hp=g.Health;g.Hurt(20);Check(g.Health==hp,"dash blocks damage");
-   Steps(g,40);g.Invulnerable=0;g.Hurt(12);Check(g.Health==88,"damage applied");
-   g.Hurt(12);Check(g.Health==88,"damage grace period");
+    g=Fresh();g.Invulnerable=0;g.Input.Dash=true;g.Step(1f/120);
+    Check(g.DashCooldown>1&&g.Invulnerable>=.64f,"dash grants invulnerability");
+    float hp=g.Health;g.Hurt(20);Check(g.Health==hp,"dash blocks damage");
+    Steps(g,60);g.Hurt(20);Check(g.Health==hp,"dash grace outlasts dash");
+    g.Invulnerable=0;g.Hurt(12);Check(g.Health==88,"damage applied");
+    g.Hurt(12);Check(g.Health==88,"damage grace period");
 
    g=Fresh();g.Pending=0;g.Spawn(0,new V(370,Game.Floor-24));
    g.Health=80;g.Input.Aim=new V(370,Game.Floor-24);g.Input.Fire=true;
@@ -128,8 +129,16 @@ public static class Tests {
 
    g=Fresh();g.Invulnerable=0;g.Hurt(150);
    Check(g.State==Stage.Dead&&g.Health==0,"death state");
-   g.Start(4);Check(g.State==Stage.Story&&g.Score==0&&g.Health==100&&!g.Ending,"restart resets run");
-   Check(Math.Abs(Game.SegmentDistance(new V(0,0),new V(100,0),new V(50,5))-5)<.01,"swept collision");
+    g.Start(4);Check(g.State==Stage.Story&&g.Score==0&&g.Health==100&&!g.Ending,"restart resets run");
+    g=new Game();g.ShowAudio();
+    Check(g.State==Stage.Audio&&g.Menu==0&&g.HelpReturn==Stage.Title,"audio opens from title");
+    g.AdjustVolume(Game.MusicVolumeIndex,-.35f);
+    Check(Math.Abs(g.Volume[Game.MusicVolumeIndex]-.45f)<.001f,"music slider adjusts");
+    g.SetVolume(Game.MasterVolumeIndex,2);Check(g.Volume[Game.MasterVolumeIndex]==1,"volume clamps high");
+    g.SetVolume(Game.SfxVolumeIndex,-1);Check(g.Volume[Game.SfxVolumeIndex]==0,"volume clamps low");
+    g.CloseAudio();Check(g.State==Stage.Title,"audio returns to title");
+    Check(Game.FireballSound==0&&Game.HitSound==1&&Game.ClearSound==2&&Game.HurtSound==3&&Game.DashSound==4&&Game.FlaskSound==5,"sound identifiers defined");
+    Check(Math.Abs(Game.SegmentDistance(new V(0,0),new V(100,0),new V(50,5))-5)<.01,"swept collision");
    Check(Campaign.Names.Length==3&&Campaign.Scenes.Length==4&&Campaign.Speakers.Length==4,"campaign content complete");
 
    using(Font font=new Font("Georgia",17,FontStyle.Regular,GraphicsUnit.Pixel))
@@ -142,15 +151,27 @@ public static class Tests {
     Check(r.FontName=="Georgia","serif interface font");
     float storyLabel=r.TextWidth("> CONTINUE",20,true),storyHint=r.TextWidth("ENTER",14,false);
     Check(storyLabel+storyHint+52<=MenuLayout.Story[0].Width,"story hint fits");
+    float endingLabel=r.TextWidth("WITNESS THE DAWN",20,true),endingHint=r.TextWidth("ENTER",14,false);
+    Check(endingLabel+endingHint+52<=MenuLayout.Epilogue[0].Width,"epilogue hint fits");
+    Check(MenuLayout.Items(Stage.Story,true)[0]==MenuLayout.Epilogue[0]&&MenuLayout.Items(Stage.Story,false)[0]==MenuLayout.Story[0],"epilogue owns its hit target");
+    Check(MenuLayout.Items(Stage.Audio).Length==4,"audio menu has sliders and back");
     float footerLeft=r.TextWidth("A/D MOVE  SPACE JUMP  MOUSE AIM + FIRE  SHIFT/RMB DASH  Q FLASK  E GATE  S DROP",13,false);
-    float footerRight=r.TextWidth("ESC PAUSE  M SOUND  F11",13,false);
+    float footerRight=r.TextWidth("ESC PAUSE  M MUTE  F11",13,false);
     Check(28+footerLeft+20<=1252-footerRight,"footer controls fit");
     g.Menu=1;Image(r,g,"title-selected");
     g.ShowHelp();Image(r,g,"help");g.CloseHelp();
     g.Start(9);Image(r,g,"story");g.ContinueStory();
     g.Spawn(0,new V(410,Game.Floor-24));g.Spawn(1,new V(810,320));g.Spawn(2,new V(1030,Game.Floor-24));
-    g.Chain=5;g.ChainTime=3;Image(r,g,"combat");
-    g.State=Stage.Upgrade;Image(r,g,"upgrade");
+     g.Chain=5;g.ChainTime=3;Image(r,g,"combat");
+     Game fire=new Game();fire.Start(77);fire.ContinueStory();fire.Invulnerable=100;
+     using(Bitmap blank=new Bitmap(1280,720),lit=new Bitmap(1280,720))
+     using(Graphics blankGraphics=Graphics.FromImage(blank),litGraphics=Graphics.FromImage(lit)){
+      r.Draw(blankGraphics,fire,1280,720,2.5f);
+      fire.Bullets.Add(new Bullet{P=new V(640,300),Velocity=new V(800,0),Life=1,Damage=10,Kind=0});
+      r.Draw(litGraphics,fire,1280,720,2.5f);
+      Check(blank.GetPixel(640,300).ToArgb()!=lit.GetPixel(640,300).ToArgb(),"player fireball renders distinctly");
+     }
+     g.State=Stage.Upgrade;Image(r,g,"upgrade");
     for(int room=0;room<3;room++){
      g.Room=room;g.EnterRoom();g.State=Stage.Story;Image(r,g,"room"+room+"-story");
      g.ContinueStory();Image(r,g,"room"+room+"-world");
@@ -170,9 +191,13 @@ public static class Tests {
     System.Reflection.MethodInfo key=typeof(Control).GetMethod("OnKeyDown",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
     System.Reflection.FieldInfo field=typeof(GameWindow).GetField("game",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
     System.Reflection.FieldInfo audioField=typeof(GameWindow).GetField("audio",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-    System.Reflection.MethodInfo mouse=typeof(Control).GetMethod("OnMouseDown",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-    Action<Keys> press=delegate(Keys k){key.Invoke(window,new object[]{new KeyEventArgs(k)});};
-    Action<int,int,MouseButtons> click=delegate(int x,int y,MouseButtons button){mouse.Invoke(window,new object[]{new MouseEventArgs(button,1,x,y,0)});};
+     System.Reflection.MethodInfo mouse=typeof(Control).GetMethod("OnMouseDown",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
+     System.Reflection.MethodInfo mouseMove=typeof(Control).GetMethod("OnMouseMove",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
+     System.Reflection.MethodInfo mouseUp=typeof(Control).GetMethod("OnMouseUp",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
+     Action<Keys> press=delegate(Keys k){key.Invoke(window,new object[]{new KeyEventArgs(k)});};
+     Action<int,int,MouseButtons> click=delegate(int x,int y,MouseButtons button){mouse.Invoke(window,new object[]{new MouseEventArgs(button,1,x,y,0)});};
+     Action<int,int> drag=delegate(int x,int y){mouseMove.Invoke(window,new object[]{new MouseEventArgs(MouseButtons.Left,0,x,y,0)});};
+     Action release=delegate{mouseUp.Invoke(window,new object[]{new MouseEventArgs(MouseButtons.Left,1,0,0,0)});};
     Game model=(Game)field.GetValue(window);
     Audio audio=(Audio)audioField.GetValue(window);
     Check(model.State==Stage.Title&&model.Menu==0,"window opens title menu");
@@ -182,11 +207,25 @@ public static class Tests {
     press(Keys.W);Check(model.Menu==0,"menu navigation wraps");
     click(900,650,MouseButtons.Left);Check(model.State==Stage.Title,"click outside menu keeps title");
     click(900,341,MouseButtons.Left);Check(model.State==Stage.Help,"mouse activates field manual");
-    press(Keys.Escape);Check(model.State==Stage.Title,"field manual returns to title");
-    press(Keys.Enter);Check(model.State==Stage.Story,"window starts story");
+     press(Keys.Escape);Check(model.State==Stage.Title,"field manual returns to title");
+     press(Keys.S);press(Keys.S);press(Keys.Enter);Check(model.State==Stage.Audio,"audio settings open");
+     float musicBefore=model.Volume[Game.MusicVolumeIndex];
+     press(Keys.S);press(Keys.A);
+     Check(model.Volume[Game.MusicVolumeIndex]<musicBefore&&audio.MusicGain<musicBefore,"music slider lowers gain");
+     press(Keys.D);
+     click(900,370,MouseButtons.Left);Check(model.AudioDragging,"slider drag begins");
+     drag(580,370);release();
+     Check(!model.AudioDragging&&model.Volume[Game.MusicVolumeIndex]<.5f,"slider drag applies volume");
+     press(Keys.Escape);Check(model.State==Stage.Title,"audio returns to title");
+     press(Keys.Enter);Check(model.State==Stage.Story,"window starts story");
     Check(audio.AmbientPlaying,"ambient starts with run");
-    click(900,650,MouseButtons.Left);Check(model.State==Stage.Playing,"mouse turns story page");
-    press(Keys.J);Check(model.State==Stage.Story,"journal reopens scene");
+     click(900,650,MouseButtons.Left);Check(model.State==Stage.Playing,"mouse turns story page");
+     Check(audio.Theme==0,"nave ambient theme");
+     model.Room=1;model.EnterRoom();Check(audio.Theme==1,"cloister ambient theme");
+     model.Room=2;model.EnterRoom();Check(audio.Theme==2,"reliquary ambient theme");
+     model.Room=0;model.EnterRoom();Check(audio.Theme==0,"ambient theme returns");
+     audio.Play(Game.FireballSound);Check(audio.SfxGain>=0,"fireball sound prepared");
+     press(Keys.J);Check(model.State==Stage.Story,"journal reopens scene");
     press(Keys.Enter);Check(model.State==Stage.Playing&&model.Room==0,"journal resumes same room");
     press(Keys.M);Check(audio.Muted&&!audio.AmbientPlaying,"mute stops ambient");
     press(Keys.M);Check(!audio.Muted&&audio.AmbientPlaying,"unmute resumes ambient");
@@ -199,7 +238,7 @@ public static class Tests {
     window.Close();Check(!window.CursorHidden,"window restores system cursor");
    }
 
-    File.WriteAllText("Tests/results.txt","PASS: "+checks+" checks. Procedural pixel rendering, 3 sanctums, bounded enemies, measured Georgia menus, story gating, boss phases, combo, hazards, flasks, full combat run, fantasy audio, fullscreen-ready native window and custom cursor.\n");
+    File.WriteAllText("Tests/results.txt","PASS: "+checks+" checks. Procedural pixel rendering, 3 sanctums, distinct epilogue, volume sliders, player fireballs, dash grace, bounded enemies, measured Georgia menus, story gating, boss phases, combo, hazards, flasks, full combat run, per-room dark-fantasy audio, fullscreen-ready native window and custom cursor.\n");
    return 0;
   }catch(Exception e){
    File.WriteAllText("Tests/results.txt","FAIL after "+checks+" checks: "+e);

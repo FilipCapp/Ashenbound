@@ -14,11 +14,15 @@ public class Particle {
 public class Hazard {
  public RectangleF Bounds;public int Kind;public float Timer;public bool Active;public float Life;
 }
-public class Game {
- public const float Floor=620,Width=1280,Height=720,EnemyMargin=44f;
- public Stage State=Stage.Title,HelpReturn=Stage.Title;
- public int Menu;
- public bool SoundOn=true;
+ public class Game {
+  public const float Floor=620,Width=1280,Height=720,EnemyMargin=44f;
+  public const int FireballSound=0,HitSound=1,ClearSound=2,HurtSound=3,DashSound=4,FlaskSound=5;
+  public const int MasterVolumeIndex=0,MusicVolumeIndex=1,SfxVolumeIndex=2;
+  public Stage State=Stage.Title,HelpReturn=Stage.Title;
+  public int Menu,AudioSlider;
+  public bool SoundOn=true,AudioDragging;
+  public readonly float[] Volume={1f,.8f,1f};
+  public Action<int> RoomEntered;
  public readonly Controls Input=new Controls();
  public V Player,Velocity,Aim=new V(1,0);
  public bool Grounded,ExitOpen,Ending;
@@ -65,8 +69,9 @@ public class Game {
    Pending=0;Spawn(3,new V(980,500));
    Toast=Campaign.Boss+" / END THE LONG DUSK";
   }
-  spawn=.8f;
- }
+   spawn=.8f;
+   if(RoomEntered!=null)RoomEntered(Room);
+  }
  void AddHazard(float x,int kind,float life){
   RectangleF b=kind==0?new RectangleF(x,Floor-16,64,16):new RectangleF(x,180,28,Floor-180);
   Hazards.Add(new Hazard{Bounds=b,Kind=kind,Timer=kind==1?1.8f:0,Active=kind==0,Life=life});
@@ -79,20 +84,24 @@ public class Game {
  public void MoveMenu(int delta,int count){if(count>0)Menu=((Menu+delta)%count+count)%count;}
  public void ShowHelp(){if(State==Stage.Help)return;HelpReturn=State;State=Stage.Help;Menu=0;Input.Fire=false;Input.ClearEdges();}
  public void CloseHelp(){State=HelpReturn==Stage.Help?Stage.Title:HelpReturn;Menu=0;Input.Fire=false;Input.ClearEdges();}
- public void ToggleSound(){SoundOn=!SoundOn;}
- public void ReturnToTitle(){State=Stage.Title;Menu=0;Input.Fire=false;Input.ClearEdges();}
+  public void ToggleSound(){SoundOn=!SoundOn;}
+  public void ShowAudio(){if(State==Stage.Audio)return;HelpReturn=State;State=Stage.Audio;Menu=AudioSlider;Input.Fire=false;Input.ClearEdges();}
+  public void CloseAudio(){State=HelpReturn==Stage.Audio?Stage.Title:HelpReturn;Menu=0;Input.Fire=false;Input.ClearEdges();}
+  public void SetVolume(int index,float value){if(index<0||index>2)return;Volume[index]=Clamp(value,0,1);}
+  public void AdjustVolume(int index,float delta){SetVolume(index,Volume[index]+delta);}
+  public void ReturnToTitle(){State=Stage.Title;Menu=0;Input.Fire=false;Input.ClearEdges();}
  public void SelectUpgrade(int n){
   if(State!=Stage.Upgrade||n<0||n>2)return;
   if(n==0)Damage*=1.15f;
   else if(n==1){MaxHealth+=30;Health=Math.Min(MaxHealth,Health+55);}
   else{FireRate=Math.Max(.07f,FireRate*.9f);Speed=Math.Min(405,Speed+12);}
-  UpgradeCount++;Room++;EnterRoom();State=Stage.Story;Menu=0;Sound(2);
+  UpgradeCount++;Room++;EnterRoom();State=Stage.Story;Menu=0;Sound(ClearSound);
  }
  public void Hurt(float amount){
   if(State!=Stage.Playing||Invulnerable>0)return;
   Health=Math.Max(0,Health-amount);Invulnerable=.85f;
   Chain=0;ChainTime=0;MultiWindow=0;Shake=9;
-  Burst(Player,Palette.Blood,20);Sound(1);
+   Burst(Player,Palette.Blood,20);Sound(HurtSound);
   if(Health<=0)State=Stage.Dead;
  }
  void Sound(int n){if(PlaySound!=null)PlaySound(n);}
@@ -107,11 +116,11 @@ public class Game {
   int horizontal=(Input.Right?1:0)-(Input.Left?1:0);
   if(Input.Jump&&Grounded){Velocity.Y=-780;Grounded=false;Burst(Player,Palette.Cyan,8);}
   if(Input.Down&&!Input.Jump&&Grounded&&Player.Y<Floor-26){Player.Y+=20;Grounded=false;}
-  if(Input.Dash&&DashCooldown<=0){
-   DashTime=.15f;DashCooldown=1.15f;Invulnerable=Math.Max(Invulnerable,.23f);
-   Velocity=new V((horizontal==0?(Aim.X>=0?1:-1):horizontal)*920,0);
-   Burst(Player,Palette.Cyan,18);Sound(3);
-  }
+   if(Input.Dash&&DashCooldown<=0){
+    DashTime=.15f;DashCooldown=1.15f;Invulnerable=Math.Max(Invulnerable,DashTime+.5f);
+    Velocity=new V((horizontal==0?(Aim.X>=0?1:-1):horizontal)*920,0);
+    Burst(Player,Palette.Cyan,18);Sound(DashSound);
+   }
   if(DashTime>0){DashTime-=dt;Burst(Player,Palette.Cyan,1);}
   else{Velocity.X=horizontal*Speed;Velocity.Y+=1750*dt;}
   float oldFoot=Player.Y+24;
@@ -126,12 +135,12 @@ public class Game {
    FireCooldown=rate;
    float damage=Damage*(Overcharged?1.35f:1f);
    Bullets.Add(new Bullet{P=Player+new V(0,-13)+Aim*29,Velocity=Aim*1000,Life=1.3f,Damage=damage,Kind=0});
-   Burst(Player+new V(0,-13)+Aim*32,Palette.Gold,3);Sound(0);
+    Burst(Player+new V(0,-13)+Aim*32,Palette.Gold,3);Sound(FireballSound);
   }
   if(Input.Flask&&FlaskCooldown<=0&&Flasks>0){
    FlaskCooldown=.9f;Flasks--;
-   Bullets.Add(new Bullet{P=Player+new V(0,-13)+Aim*24,Velocity=Aim*620+new V(0,-260),Life=2.2f,Damage=70,Gravity=900,Kind=1});
-   Sound(3);
+    Bullets.Add(new Bullet{P=Player+new V(0,-13)+Aim*24,Velocity=Aim*620+new V(0,-260),Life=2.2f,Damage=70,Gravity=900,Kind=1});
+    Sound(FlaskSound);
   }
   if(Pending>0){
    spawn-=dt;
@@ -150,7 +159,7 @@ public class Game {
   }
   if(!ExitOpen&&Pending==0&&Enemies.Count==0){
    ExitOpen=true;Score+=500;Bullets.RemoveAll(delegate(Bullet b){return b.Hostile;});
-   Toast="SANCTUM CLEAR / THE GATE IS OPEN";ToastTime=4;Sound(2);
+   Toast="SANCTUM CLEAR / THE GATE IS OPEN";ToastTime=4;Sound(ClearSound);
   }
   if(ExitOpen&&Player.X>1150&&Input.Use){
    if(Room==Campaign.TotalRooms-1){Ending=true;State=Stage.Story;}
