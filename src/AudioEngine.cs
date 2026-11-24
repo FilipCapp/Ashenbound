@@ -108,33 +108,66 @@ namespace Ashenbound {
   public static float EffectSample(int room,int effect,int index){return effects[room][effect][index];}
   public static float MusicSeam(int track){return Math.Abs(music[track][0]-music[track][LoopSamples-1]);}
  }
- public sealed class PcmMixer : IDisposable {
-  [StructLayout(LayoutKind.Sequential)]
-  struct WaveFormatEx {public ushort FormatTag,Channels;public uint SamplesPerSecond,AverageBytesPerSecond;public ushort BlockAlign,BitsPerSample,Size;}
-  [StructLayout(LayoutKind.Sequential)]
-  struct WaveHeader {public IntPtr Data;public uint BufferLength,BytesRecorded,User,Flags,Loops;public IntPtr Next;public uint Reserved;}
-  [DllImport("winmm.dll")] static extern uint waveOutOpen(out IntPtr handle,uint deviceId,ref WaveFormatEx format,IntPtr callback,IntPtr instance,uint flags);
-  [DllImport("winmm.dll")] static extern uint waveOutPrepareHeader(IntPtr handle,IntPtr header,uint size);
-  [DllImport("winmm.dll")] static extern uint waveOutWrite(IntPtr handle,IntPtr header,uint size);
-  [DllImport("winmm.dll")] static extern uint waveOutUnprepareHeader(IntPtr handle,IntPtr header,uint size);
-  [DllImport("winmm.dll")] static extern uint waveOutReset(IntPtr handle);
-  [DllImport("winmm.dll")] static extern uint waveOutClose(IntPtr handle);
-  const uint CallbackEvent=0x00050000,BufferSamples=2048,BufferCount=8;
-  static readonly int HeaderSize=Marshal.SizeOf(typeof(WaveHeader));
-  readonly object sync=new object();readonly List<Voice> voices=new List<Voice>();
-  readonly AutoResetEvent ready=new AutoResetEvent(false);readonly ManualResetEvent stop=new ManualResetEvent(false);
-  readonly WaitHandle[] waits;readonly float[] frame=new float[BufferSamples];
-  byte[][] buffers;GCHandle[] pins;IntPtr[] headers;IntPtr device=IntPtr.Zero;Thread thread;
-  int writeIndex,position,fromTrack=-1,toTrack=-1,fade,fadeLength;
-  float master=1,musicVolume=.8f,sfxVolume=1;
-  bool musicPlaying,muted,running,disposed,available;
-   struct Voice {public int Effect;public int Position;}
-   public PcmMixer():this(true){}
-   public PcmMixer(bool stream){
-    waits=new WaitHandle[]{ready,stop};fadeLength=SoundData.Rate*2;
-    if(stream)Start();
+  public sealed class PcmMixer : IDisposable {
+   [StructLayout(LayoutKind.Sequential,Pack=1)]
+   struct WaveFormatEx {public ushort FormatTag,Channels;public uint SamplesPerSecond,AverageBytesPerSecond;public ushort BlockAlign,BitsPerSample,Size;}
+   [ComImport,Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+   interface IMMDeviceEnumerator {
+    [PreserveSig] int EnumAudioEndpoints(int dataFlow,uint stateMask,IntPtr devices);
+    [PreserveSig] int GetDefaultAudioEndpoint(int dataFlow,int role,out IMMDevice endpoint);
    }
-   public bool Available{get{return available;}}
+   [ComImport,Guid("D666063F-1587-4E43-81F1-B948E807363F"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+   interface IMMDevice {
+    [PreserveSig] int Activate(ref Guid iid,uint context,IntPtr parameters,out IAudioClient client);
+   }
+   [ComImport,Guid("1CB9AD4C-DBFA-4C32-B178-C2F568A703B2"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+   interface IAudioClient {
+    [PreserveSig] int Initialize(int shareMode,uint flags,long bufferDuration,long periodicity,ref WaveFormatEx format,IntPtr session);
+    [PreserveSig] int GetBufferSize(out uint frames);
+    [PreserveSig] int GetStreamLatency(out long latency);
+    [PreserveSig] int GetCurrentPadding(out uint padding);
+    [PreserveSig] int IsFormatSupported(int shareMode,ref WaveFormatEx format,out IntPtr closest);
+    [PreserveSig] int GetMixFormat(out IntPtr format);
+    [PreserveSig] int GetDevicePeriod(out long defaultPeriod,out long minimumPeriod);
+    [PreserveSig] int Start();
+    [PreserveSig] int Stop();
+    [PreserveSig] int Reset();
+    [PreserveSig] int SetEventHandle(IntPtr handle);
+    [PreserveSig] int GetService(ref Guid iid,out IAudioRenderClient service);
+   }
+   [ComImport,Guid("F294ACFC-3146-4483-A7BF-ADDCA7C260E2"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+   interface IAudioRenderClient {
+    [PreserveSig] int GetBuffer(uint frames,out IntPtr data);
+    [PreserveSig] int ReleaseBuffer(uint frames,uint flags);
+   }
+   [DllImport("ole32.dll")] static extern int CoInitializeEx(IntPtr reserved,uint context);
+   [DllImport("ole32.dll")] static extern void CoUninitialize();
+   [DllImport("ole32.dll")] static extern int CoCreateInstance(ref Guid clsid,IntPtr outer,uint context,ref Guid iid,out IntPtr instance);
+   const uint EventCallback=0x00040000,AutoConvertPcm=0x80000000,SrcDefaultQuality=0x08000000;
+   const uint ClassContextAll=0x00000017,CoInitApartmentThreaded=0x00000002;
+   const int DataFlowRender=0,RoleMultimedia=1,ShareModeShared=0;
+   const long BufferDuration=200000;
+   const int BufferSamples=512;
+
+   readonly object sync=new object();readonly List<Voice> voices=new List<Voice>();
+   readonly AutoResetEvent ready=new AutoResetEvent(false);readonly ManualResetEvent stop=new ManualResetEvent(false);
+   readonly ManualResetEvent initialized=new ManualResetEvent(false);readonly WaitHandle[] waits;
+   float[] frame=new float[BufferSamples];byte[] renderBytes;Thread thread;
+   IMMDeviceEnumerator enumerator;IMMDevice endpoint;IAudioClient audioClient;IAudioRenderClient renderClient;
+   volatile bool running,available;
+   bool musicPlaying,muted,disposed,comInitialized,comMustUninitialize;
+   int bufferFrames,position,fromTrack=-1,toTrack=-1,fade,fadeLength;
+   float master=1,musicVolume=.8f,sfxVolume=1;
+    struct Voice {public int Effect;public int Position;public int Room;}
+    public PcmMixer():this(true){}
+    public PcmMixer(bool stream){
+     waits=new WaitHandle[]{ready,stop};fadeLength=SoundData.Rate*2;
+     if(stream)Start();
+    }
+    public bool Available{get{return available;}}
+    internal static int WaveFormatBytes{get{return Marshal.SizeOf(typeof(WaveFormatEx));}}
+    internal static long WasapiBufferDuration{get{return BufferDuration;}}
+
    public int Room{get{lock(sync)return room;}}
    public bool Muted{get{lock(sync)return muted;}}
 
@@ -170,12 +203,13 @@ namespace Ashenbound {
    lock(sync){
     if(muted||effect<0||effect>=6)return;
     if(voices.Count>=16)voices.RemoveAt(0);
-    voices.Add(new Voice{Effect=effect,Position=0});
+    voices.Add(new Voice{Effect=effect,Position=0,Room=room});
    }
   }
-  void Mix(float[] target){
-   lock(sync){
-    for(int i=0;i<target.Length;i++){
+   void Mix(float[] target,int count){
+    lock(sync){
+     for(int i=0;i<count;i++){
+
      float musicSample=0;
      float weight=fadeLength<=0?1:Math.Min(1,(float)fade/fadeLength);
      if(fromTrack>=0&&weight<1)musicSample+=SoundData.MusicSample(fromTrack,position)*(1-weight);
@@ -183,7 +217,7 @@ namespace Ashenbound {
      float sfxSample=0;
       for(int v=voices.Count-1;v>=0;v--){
        Voice voice=voices[v];
-       sfxSample+=SoundData.EffectSample(room,voice.Effect,voice.Position);
+       sfxSample+=SoundData.EffectSample(voice.Room,voice.Effect,voice.Position);
        voice.Position++;
        if(voice.Position>=SoundData.EffectLength(voice.Effect))voices.RemoveAt(v);else voices[v]=voice;
       }
@@ -196,60 +230,105 @@ namespace Ashenbound {
     }
    }
    }
-   public void Render(float[] target){
-    if(target==null)throw new ArgumentNullException("target");
-    Mix(target);
-   }
+    public void Render(float[] target){
+     if(target==null)throw new ArgumentNullException("target");
+     Mix(target,target.Length);
+    }
+
    int room;
    public void SetRoom(int index){lock(sync)room=(int)Game.Clamp(index,0,2);}
    void Start(){
-   WaveFormatEx format=new WaveFormatEx();
-   format.FormatTag=1;format.Channels=1;format.SamplesPerSecond=SoundData.Rate;
-   format.AverageBytesPerSecond=(uint)(SoundData.Rate*2);format.BlockAlign=2;format.BitsPerSample=16;format.Size=0;
-   if(waveOutOpen(out device,0,ref format,ready.SafeWaitHandle.DangerousGetHandle(),IntPtr.Zero,CallbackEvent)!=0){
-    device=IntPtr.Zero;available=false;return;
+    thread=new Thread(Run);thread.IsBackground=true;
+    running=true;thread.Start();initialized.WaitOne();
    }
-   buffers=new byte[BufferCount][];pins=new GCHandle[BufferCount];headers=new IntPtr[BufferCount];
-   for(int i=0;i<BufferCount;i++){
-    buffers[i]=new byte[BufferSamples*2];pins[i]=GCHandle.Alloc(buffers[i],GCHandleType.Pinned);
-    headers[i]=Marshal.AllocHGlobal(HeaderSize);
-    WaveHeader header=new WaveHeader();header.Data=pins[i].AddrOfPinnedObject();header.BufferLength=(uint)buffers[i].Length;
-    Marshal.StructureToPtr(header,headers[i],false);
-    if(waveOutPrepareHeader(device,headers[i],(uint)HeaderSize)!=0){available=false;return;}
+   bool InitializeAudio(){
+    int result=CoInitializeEx(IntPtr.Zero,CoInitApartmentThreaded);
+    if(result<0)return false;
+    comInitialized=true;comMustUninitialize=result==0;
+    Guid clsid=new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E");
+    Guid iidEnumerator=new Guid("A95664D2-9614-4F35-A746-DE8DB63617E6");
+    IntPtr raw=IntPtr.Zero;
+    if(CoCreateInstance(ref clsid,IntPtr.Zero,ClassContextAll,ref iidEnumerator,out raw)<0||raw==IntPtr.Zero)return false;
+    try{enumerator=(IMMDeviceEnumerator)Marshal.GetTypedObjectForIUnknown(raw,typeof(IMMDeviceEnumerator));}
+    finally{if(raw!=IntPtr.Zero)Marshal.Release(raw);}
+    if(enumerator==null)return false;
+    if(enumerator.GetDefaultAudioEndpoint(DataFlowRender,RoleMultimedia,out endpoint)<0||endpoint==null)return false;
+    Guid iidClient=new Guid("1CB9AD4C-DBFA-4C32-B178-C2F568A703B2");
+    WaveFormatEx format=new WaveFormatEx();
+    format.FormatTag=1;format.Channels=1;format.SamplesPerSecond=SoundData.Rate;
+    format.AverageBytesPerSecond=(uint)(SoundData.Rate*2);format.BlockAlign=2;format.BitsPerSample=16;format.Size=0;
+    uint[] attempts=new uint[]{EventCallback|AutoConvertPcm|SrcDefaultQuality,EventCallback|AutoConvertPcm,EventCallback};
+    for(int i=0;i<attempts.Length;i++){
+     IAudioClient attempt=null;
+     if(endpoint.Activate(ref iidClient,ClassContextAll,IntPtr.Zero,out attempt)<0||attempt==null)continue;
+     if(attempt.Initialize(ShareModeShared,attempts[i],BufferDuration,0,ref format,IntPtr.Zero)<0){ReleaseCom(attempt);continue;}
+     audioClient=attempt;break;
+    }
+    if(audioClient==null)return false;
+    uint frames;
+    if(audioClient.GetBufferSize(out frames)<0||frames==0)return false;
+    if(audioClient.SetEventHandle(ready.SafeWaitHandle.DangerousGetHandle())<0)return false;
+    Guid iidRender=new Guid("F294ACFC-3146-4483-A7BF-ADDCA7C260E2");
+    if(audioClient.GetService(ref iidRender,out renderClient)<0||renderClient==null)return false;
+    bufferFrames=(int)frames;
+    frame=new float[bufferFrames];renderBytes=new byte[bufferFrames*2];
+    if(!RenderBuffer(bufferFrames))return false;
+    if(audioClient.Start()<0)return false;
+    available=true;
+    return true;
    }
-   available=true;running=true;thread=new Thread(Run);thread.IsBackground=true;thread.Start();
-   for(int i=0;i<BufferCount;i++)Write(i);
-  }
-  void Write(int index){
-   if(device==IntPtr.Zero||headers==null)return;
-   Mix(frame);byte[] data=buffers[index];
-   for(int i=0;i<BufferSamples;i++){
-    short sample=(short)(frame[i]*32767);data[i*2]=(byte)(sample&255);data[i*2+1]=(byte)((sample>>8)&255);
+   void Run(){
+    bool ok=false;
+    try{ok=InitializeAudio();}catch{}
+    initialized.Set();
+    if(ok){try{Loop();}catch{}}
+    Cleanup();
    }
-   WaveHeader header=(WaveHeader)Marshal.PtrToStructure(headers[index],typeof(WaveHeader));
-   header.BufferLength=(uint)data.Length;header.Flags=0;
-   Marshal.StructureToPtr(header,headers[index],false);
-   waveOutWrite(device,headers[index],(uint)HeaderSize);
-  }
-  void Run(){
-   while(running){
-    int signal=WaitHandle.WaitAny(waits);
-    if(signal==1||!running)return;
-     Write(writeIndex);writeIndex=(writeIndex+1)%(int)BufferCount;
+   void Loop(){
+    while(running){
+     if(WaitHandle.WaitAny(waits)==1)break;
+     if(audioClient==null||renderClient==null)break;
+     uint padding;
+     if(audioClient.GetCurrentPadding(out padding)<0)continue;
+     int count=bufferFrames-(int)padding;
+     if(count<=0)continue;
+     if(count>bufferFrames)count=bufferFrames;
+     RenderBuffer(count);
+    }
    }
-  }
-  public void Dispose(){
-   if(disposed)return;disposed=true;
-   lock(sync){running=false;}
-   stop.Set();if(thread!=null){thread.Join(1000);thread=null;}
-   if(device!=IntPtr.Zero){
-    waveOutReset(device);
-    if(headers!=null)for(int i=0;i<headers.Length;i++)if(headers[i]!=IntPtr.Zero)waveOutUnprepareHeader(device,headers[i],(uint)HeaderSize);
-    waveOutClose(device);device=IntPtr.Zero;
+   bool RenderBuffer(int frames){
+    if(frames<=0||frames>bufferFrames||renderClient==null||renderBytes==null||frame==null)return false;
+    IntPtr data;
+    if(renderClient.GetBuffer((uint)frames,out data)<0||data==IntPtr.Zero)return false;
+    Mix(frame,frames);
+    int bytes=frames*2;
+    for(int i=0;i<frames;i++){
+     short sample=(short)(frame[i]*32767);
+     renderBytes[i*2]=(byte)(sample&255);renderBytes[i*2+1]=(byte)((sample>>8)&255);
+    }
+    Marshal.Copy(renderBytes,0,data,bytes);
+    return renderClient.ReleaseBuffer((uint)frames,0)>=0;
    }
-   if(headers!=null)for(int i=0;i<headers.Length;i++)if(headers[i]!=IntPtr.Zero){Marshal.FreeHGlobal(headers[i]);headers[i]=IntPtr.Zero;}
-   if(pins!=null)for(int i=0;i<pins.Length;i++)if(pins[i].IsAllocated)pins[i].Free();
-   stop.Dispose();ready.Dispose();
-  }
+   static void ReleaseCom(object value){
+    if(value==null)return;
+    try{Marshal.ReleaseComObject(value);}catch{}
+   }
+   void Cleanup(){
+    try{if(audioClient!=null){audioClient.Stop();audioClient.Reset();}}catch{}
+    ReleaseCom(renderClient);renderClient=null;
+    ReleaseCom(audioClient);audioClient=null;
+    ReleaseCom(endpoint);endpoint=null;
+    ReleaseCom(enumerator);enumerator=null;
+    if(comInitialized&&comMustUninitialize)CoUninitialize();
+    comInitialized=false;comMustUninitialize=false;
+    available=false;running=false;
+   }
+   public void Dispose(){
+    if(disposed)return;disposed=true;
+    lock(sync){running=false;}
+    stop.Set();if(thread!=null){thread.Join();thread=null;}
+    initialized.Dispose();stop.Dispose();ready.Dispose();
+   }
+
  }
 }

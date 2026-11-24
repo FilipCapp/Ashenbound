@@ -159,7 +159,7 @@ public class GameWindow : Form {
 public sealed class Audio : IDisposable {
  public const int RoomTracks=3,MenuTrack=3,DawnTrack=4,TrackCount=5;
  readonly PcmMixer mixer;
- public Audio(){mixer=new PcmMixer();}
+ public Audio(){mixer=new PcmMixer();mixer.SetGains(1,.8f,.65f);}
   public bool Available{get{return mixer.Available;}}
   public bool MixerAvailable{get{return mixer.Available;}}
   public bool IsRoom(int n){return n>=0&&n<RoomTracks&&mixer.Room==n;}

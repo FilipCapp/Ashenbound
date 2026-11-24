@@ -40,6 +40,8 @@ public static class Tests {
    Game sameAgain=new Game();sameAgain.Start(12345);sameAgain.ContinueStory();Steps(sameAgain,120);
     Check(sameAgain.Enemies.Count==same.Enemies.Count&&sameAgain.Enemies[0].Kind==same.Enemies[0].Kind,"seeded spawn repeatable");
     Check(SoundData.Rate==22050&&SoundData.LoopSeconds==16&&SoundData.TrackCount==5,"pcm loop format");
+     Check(PcmMixer.WaveFormatBytes==18,"wasapi pcm format layout");
+     Check(PcmMixer.WasapiBufferDuration<500000,"wasapi buffer stays under half second");
     bool seams=true;
     for(int t=0;t<SoundData.TrackCount;t++)if(SoundData.MusicSeam(t)>.03f)seams=false;
     Check(seams,"pcm music loops without audible seam");
@@ -318,6 +320,7 @@ public static class Tests {
     Audio audio=(Audio)audioField.GetValue(window);
     Check(model.State==Stage.Title&&model.Menu==0,"window opens title menu");
      Check(!audio.AmbientPlaying&&audio.MenuPlaying&&audio.ActiveTrack==Audio.MenuTrack,"menu music plays at title");
+     Check(Math.Abs(audio.SfxGain-.65f)<.001f,"default sfx gain");
     bool sound=model.SoundOn;press(Keys.M);Check(model.SoundOn!=sound,"window sound toggle");press(Keys.M);Check(model.SoundOn==sound,"window sound restored");
     press(Keys.S);Check(model.Menu==1,"menu keyboard navigation");
     press(Keys.W);Check(model.Menu==0,"menu navigation wraps");
