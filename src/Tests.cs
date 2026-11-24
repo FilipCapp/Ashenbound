@@ -132,16 +132,22 @@ public static class Tests {
    Check(Math.Abs(Game.SegmentDistance(new V(0,0),new V(100,0),new V(50,5))-5)<.01,"swept collision");
    Check(Campaign.Names.Length==3&&Campaign.Scenes.Length==4&&Campaign.Speakers.Length==4,"campaign content complete");
 
-   using(Font font=new Font("Consolas",19,FontStyle.Regular,GraphicsUnit.Pixel))
+   using(Font font=new Font("Georgia",17,FontStyle.Regular,GraphicsUnit.Pixel))
    using(Bitmap bitmap=new Bitmap(1,1))using(Graphics graphics=Graphics.FromImage(bitmap)){
-    foreach(string scene in Campaign.Scenes)Check(graphics.MeasureString(scene,font,626).Height<324,"story fits page");
+    foreach(string scene in Campaign.Scenes)Check(graphics.MeasureString(scene,font,724).Height<240,"story fits wrapped page");
    }
 
-    using(Renderer r=new Renderer()){
-     g=new Game();Image(r,g,"title");
-     g.Menu=1;Image(r,g,"title-selected");
-     g.ShowHelp();Image(r,g,"help");g.CloseHelp();
-     g.Start(9);Image(r,g,"story");g.ContinueStory();
+   using(Renderer r=new Renderer()){
+    g=new Game();Image(r,g,"title");
+    Check(r.FontName=="Georgia","serif interface font");
+    float storyLabel=r.TextWidth("> CONTINUE",20,true),storyHint=r.TextWidth("ENTER",14,false);
+    Check(storyLabel+storyHint+52<=MenuLayout.Story[0].Width,"story hint fits");
+    float footerLeft=r.TextWidth("A/D MOVE  SPACE JUMP  MOUSE AIM + FIRE  SHIFT/RMB DASH  Q FLASK  E GATE  S DROP",13,false);
+    float footerRight=r.TextWidth("ESC PAUSE  M SOUND  F11",13,false);
+    Check(28+footerLeft+20<=1252-footerRight,"footer controls fit");
+    g.Menu=1;Image(r,g,"title-selected");
+    g.ShowHelp();Image(r,g,"help");g.CloseHelp();
+    g.Start(9);Image(r,g,"story");g.ContinueStory();
     g.Spawn(0,new V(410,Game.Floor-24));g.Spawn(1,new V(810,320));g.Spawn(2,new V(1030,Game.Floor-24));
     g.Chain=5;g.ChainTime=3;Image(r,g,"combat");
     g.State=Stage.Upgrade;Image(r,g,"upgrade");
@@ -158,35 +164,42 @@ public static class Tests {
     }
    }
 
-    using(GameWindow window=new GameWindow()){
-     window.Show();Application.DoEvents();
-     System.Reflection.MethodInfo key=typeof(Control).GetMethod("OnKeyDown",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-     System.Reflection.FieldInfo field=typeof(GameWindow).GetField("game",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-     System.Reflection.MethodInfo mouse=typeof(Control).GetMethod("OnMouseDown",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-     Action<Keys> press=delegate(Keys k){key.Invoke(window,new object[]{new KeyEventArgs(k)});};
-     Action<int,int,MouseButtons> click=delegate(int x,int y,MouseButtons button){mouse.Invoke(window,new object[]{new MouseEventArgs(button,1,x,y,0)});};
-     Game model=(Game)field.GetValue(window);
-     Check(model.State==Stage.Title&&model.Menu==0,"window opens title menu");
-     bool sound=model.SoundOn;press(Keys.M);Check(model.SoundOn!=sound,"window sound toggle");press(Keys.M);Check(model.SoundOn==sound,"window sound restored");
-     press(Keys.S);Check(model.Menu==1,"menu keyboard navigation");
-     press(Keys.W);Check(model.Menu==0,"menu navigation wraps");
-     click(900,650,MouseButtons.Left);Check(model.State==Stage.Title,"click outside menu keeps title");
-     click(900,341,MouseButtons.Left);Check(model.State==Stage.Help,"mouse activates field manual");
-     press(Keys.Escape);Check(model.State==Stage.Title,"field manual returns to title");
-     press(Keys.Enter);Check(model.State==Stage.Story,"window starts story");
-     click(900,650,MouseButtons.Left);Check(model.State==Stage.Playing,"mouse turns story page");
-     press(Keys.J);Check(model.State==Stage.Story,"journal reopens scene");
-     press(Keys.Enter);Check(model.State==Stage.Playing&&model.Room==0,"journal resumes same room");
-     press(Keys.Escape);Check(model.State==Stage.Paused&&model.Menu==0,"window pauses");
-     press(Keys.S);press(Keys.Enter);Check(model.State==Stage.Help&&model.HelpReturn==Stage.Paused,"pause opens field manual");
-     press(Keys.Escape);Check(model.State==Stage.Paused,"field manual returns to pause");
-     press(Keys.Escape);Check(model.State==Stage.Playing,"window resumes");
-     window.ClientSize=new Size(960,600);Application.DoEvents();
-     using(Bitmap b=new Bitmap(window.Width,window.Height)){window.DrawToBitmap(b,window.ClientRectangle);b.Save("Tests/window.png");}
-     window.Close();
-    }
+   using(GameWindow window=new GameWindow(false)){
+    window.Show();Application.DoEvents();
+    Check(window.CursorHidden,"window hides system cursor");
+    System.Reflection.MethodInfo key=typeof(Control).GetMethod("OnKeyDown",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
+    System.Reflection.FieldInfo field=typeof(GameWindow).GetField("game",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
+    System.Reflection.FieldInfo audioField=typeof(GameWindow).GetField("audio",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
+    System.Reflection.MethodInfo mouse=typeof(Control).GetMethod("OnMouseDown",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
+    Action<Keys> press=delegate(Keys k){key.Invoke(window,new object[]{new KeyEventArgs(k)});};
+    Action<int,int,MouseButtons> click=delegate(int x,int y,MouseButtons button){mouse.Invoke(window,new object[]{new MouseEventArgs(button,1,x,y,0)});};
+    Game model=(Game)field.GetValue(window);
+    Audio audio=(Audio)audioField.GetValue(window);
+    Check(model.State==Stage.Title&&model.Menu==0,"window opens title menu");
+    Check(!audio.AmbientPlaying,"ambient silent at title");
+    bool sound=model.SoundOn;press(Keys.M);Check(model.SoundOn!=sound,"window sound toggle");press(Keys.M);Check(model.SoundOn==sound,"window sound restored");
+    press(Keys.S);Check(model.Menu==1,"menu keyboard navigation");
+    press(Keys.W);Check(model.Menu==0,"menu navigation wraps");
+    click(900,650,MouseButtons.Left);Check(model.State==Stage.Title,"click outside menu keeps title");
+    click(900,341,MouseButtons.Left);Check(model.State==Stage.Help,"mouse activates field manual");
+    press(Keys.Escape);Check(model.State==Stage.Title,"field manual returns to title");
+    press(Keys.Enter);Check(model.State==Stage.Story,"window starts story");
+    Check(audio.AmbientPlaying,"ambient starts with run");
+    click(900,650,MouseButtons.Left);Check(model.State==Stage.Playing,"mouse turns story page");
+    press(Keys.J);Check(model.State==Stage.Story,"journal reopens scene");
+    press(Keys.Enter);Check(model.State==Stage.Playing&&model.Room==0,"journal resumes same room");
+    press(Keys.M);Check(audio.Muted&&!audio.AmbientPlaying,"mute stops ambient");
+    press(Keys.M);Check(!audio.Muted&&audio.AmbientPlaying,"unmute resumes ambient");
+    press(Keys.Escape);Check(model.State==Stage.Paused&&model.Menu==0,"window pauses");
+    press(Keys.S);press(Keys.Enter);Check(model.State==Stage.Help&&model.HelpReturn==Stage.Paused,"pause opens field manual");
+    press(Keys.Escape);Check(model.State==Stage.Paused,"field manual returns to pause");
+    press(Keys.Escape);Check(model.State==Stage.Playing,"window resumes");
+    window.ClientSize=new Size(960,600);Application.DoEvents();
+    using(Bitmap b=new Bitmap(window.Width,window.Height)){window.DrawToBitmap(b,window.ClientRectangle);b.Save("Tests/window.png");}
+    window.Close();Check(!window.CursorHidden,"window restores system cursor");
+   }
 
-    File.WriteAllText("Tests/results.txt","PASS: "+checks+" checks. Procedural pixel rendering, 3 sanctums, bounded enemies, redesigned menus, story gating, boss phases, combo, hazards, flasks, full combat run and native window controls.\n");
+    File.WriteAllText("Tests/results.txt","PASS: "+checks+" checks. Procedural pixel rendering, 3 sanctums, bounded enemies, measured Georgia menus, story gating, boss phases, combo, hazards, flasks, full combat run, fantasy audio, fullscreen-ready native window and custom cursor.\n");
    return 0;
   }catch(Exception e){
    File.WriteAllText("Tests/results.txt","FAIL after "+checks+" checks: "+e);

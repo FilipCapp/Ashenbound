@@ -17,7 +17,7 @@ public struct V {
    new RectangleF(740,238,430,62),new RectangleF(740,310,430,62),
    new RectangleF(740,382,430,62),new RectangleF(740,454,430,62)
   };
-  public static readonly RectangleF[] Story={new RectangleF(760,586,222,54)};
+  public static readonly RectangleF[] Story={new RectangleF(760,586,270,54)};
   public static readonly RectangleF[] Upgrade={
    new RectangleF(250,270,780,96),new RectangleF(250,382,780,96),new RectangleF(250,494,780,96)
   };

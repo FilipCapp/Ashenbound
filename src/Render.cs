@@ -5,16 +5,45 @@ using System.Drawing.Text;
 namespace Ashenbound {
 public sealed class Renderer : IDisposable {
  Graphics g;Game game;float clock;
- public bool ReduceMotion;
- readonly FontFamily family=new FontFamily("Consolas");
- readonly PixelArt pixels=new PixelArt();
- readonly Bitmap canvas=new Bitmap(320,180);
- public void Dispose(){family.Dispose();pixels.Dispose();canvas.Dispose();}
- void Box(float x,float y,float w,float h,Color c){if(w<=0||h<=0)return;using(var b=new SolidBrush(c))g.FillRectangle(b,x,y,w,h);}
- void Line(float x,float y,float x2,float y2,Color c,float width){using(var p=new Pen(c,width))g.DrawLine(p,x,y,x2,y2);}
- void Text(string s,float x,float y,float size,Color c){using(var f=new Font(family,size,FontStyle.Regular,GraphicsUnit.Pixel))using(var b=new SolidBrush(c))g.DrawString(s,f,b,x,y,StringFormat.GenericTypographic);}
- void Bold(string s,float x,float y,float size,Color c){using(var f=new Font(family,size,FontStyle.Bold,GraphicsUnit.Pixel))using(var b=new SolidBrush(c))g.DrawString(s,f,b,x,y,StringFormat.GenericTypographic);}
- void Circle(float x,float y,float r,Color c){using(var b=new SolidBrush(c))g.FillEllipse(b,x-r,y-r,r*2,r*2);}
+  public bool ReduceMotion;
+  public string FontName{get{return family.Name;}}
+  readonly FontFamily family=CreateFamily("Georgia","Serif");
+  readonly PixelArt pixels=new PixelArt();
+  readonly Bitmap canvas=new Bitmap(320,180);
+  public void Dispose(){family.Dispose();pixels.Dispose();canvas.Dispose();}
+  static FontFamily CreateFamily(params string[] names){
+   for(int i=0;i<names.Length;i++){try{return new FontFamily(names[i]);}catch{}}
+   return new FontFamily(FontFamily.GenericSerif.Name);
+  }
+  void Box(float x,float y,float w,float h,Color c){if(w<=0||h<=0)return;using(var b=new SolidBrush(c))g.FillRectangle(b,x,y,w,h);}
+  void Line(float x,float y,float x2,float y2,Color c,float width){using(var p=new Pen(c,width))g.DrawLine(p,x,y,x2,y2);}
+  void Text(string s,float x,float y,float size,Color c){using(var f=new Font(family,size,FontStyle.Regular,GraphicsUnit.Pixel))using(var b=new SolidBrush(c))g.DrawString(s,f,b,x,y,StringFormat.GenericTypographic);}
+  void Bold(string s,float x,float y,float size,Color c){using(var f=new Font(family,size,FontStyle.Bold,GraphicsUnit.Pixel))using(var b=new SolidBrush(c))g.DrawString(s,f,b,x,y,StringFormat.GenericTypographic);}
+  float Measure(string s,float size,bool bold){using(var f=new Font(family,size,bold?FontStyle.Bold:FontStyle.Regular,GraphicsUnit.Pixel))return g.MeasureString(s,f,new SizeF(10000,10000),StringFormat.GenericTypographic).Width;}
+  public float TextWidth(string s,float size,bool bold){
+   using(Bitmap b=new Bitmap(1,1))using(Graphics mg=Graphics.FromImage(b))
+   using(Font f=new Font(family,size,bold?FontStyle.Bold:FontStyle.Regular,GraphicsUnit.Pixel))
+   return mg.MeasureString(s,f,new SizeF(10000,10000),StringFormat.GenericTypographic).Width;
+  }
+  void TextRight(string s,float right,float y,float size,Color c){Text(s,right-Measure(s,size,false),y,size,c);}
+  void TextWrap(string s,float x,float y,float maxWidth,float size,float lineHeight,Color c){
+   using(var f=new Font(family,size,FontStyle.Regular,GraphicsUnit.Pixel))using(var b=new SolidBrush(c)){
+    float cy=y;string[] paragraphs=s.Split('\n');
+    for(int p=0;p<paragraphs.Length;p++){
+     if(paragraphs[p].Length==0){cy+=lineHeight;continue;}
+     string[] words=paragraphs[p].Split(' ');string line="";
+     for(int n=0;n<words.Length;n++){
+      string candidate=line.Length==0?words[n]:line+" "+words[n];
+      if(g.MeasureString(candidate,f,new SizeF(10000,10000),StringFormat.GenericTypographic).Width>maxWidth&&line.Length>0){
+       g.DrawString(line,f,b,x,cy,StringFormat.GenericTypographic);cy+=lineHeight;line=words[n];
+      } else line=candidate;
+     }
+     if(line.Length>0){g.DrawString(line,f,b,x,cy,StringFormat.GenericTypographic);cy+=lineHeight;}
+    }
+   }
+  }
+  void Guide(string key,string value,float x,float y){Bold(key,x,y,15,Palette.Gold);Text(value,x+112,y,15,Palette.Ash);}
+  void Circle(float x,float y,float r,Color c){using(var b=new SolidBrush(c))g.FillEllipse(b,x-r,y-r,r*2,r*2);}
  public void Draw(Graphics graphics,Game model,int width,int height,float seconds){
   game=model;clock=seconds;graphics.Clear(Color.Black);
   using(Graphics low=Graphics.FromImage(canvas)){
@@ -36,13 +65,14 @@ public sealed class Renderer : IDisposable {
   g.DrawImage(canvas,new Rectangle(0,0,(int)Game.Width,(int)Game.Height));
   g.TextRenderingHint=TextRenderingHint.SingleBitPerPixelGridFit;
   g.SmoothingMode=SmoothingMode.None;
-  if(game.State==Stage.Title){Title();return;}
+  if(game.State==Stage.Title){Title();CursorMark();return;}
   Hud();
   if(game.State==Stage.Story)StoryPage();
   else if(game.State==Stage.Upgrade)Upgrades();
   else if(game.State==Stage.Paused)Pause();
   else if(game.State==Stage.Help)Help();
   else if(game.State==Stage.Won||game.State==Stage.Dead)End();
+  CursorMark();
  }
  void World(){
   foreach(RectangleF r in game.Platforms){
@@ -78,13 +108,8 @@ public sealed class Renderer : IDisposable {
   }
   foreach(Particle p in game.Particles)Box(p.P.X,p.P.Y,4,4,Color.FromArgb((int)(255*Game.Clamp(p.Life/p.Max,0,1)),p.Color));
   if(game.Invulnerable<=0||((int)(clock*24))%2==0)Actor(game.Player,game.Aim,1,0);
-  if(game.State==Stage.Playing){
-   V a=game.Input.Aim;
-   Line(a.X-9,a.Y,a.X-4,a.Y,Palette.Cyan,1);Line(a.X+4,a.Y,a.X+9,a.Y,Palette.Cyan,1);
-   Line(a.X,a.Y-9,a.X,a.Y-4,Palette.Cyan,1);Line(a.X,a.Y+4,a.X,a.Y+9,Palette.Cyan,1);
-  }
  }
- void Actor(V p,V aim,float size,int type){
+  void Actor(V p,V aim,float size,int type){
   int frame=game.State==Stage.Playing&&Math.Abs(game.Velocity.X)>10?(int)(clock*9)%2:0;
   pixels.Sprite(g,type,p,size,aim.X<0,frame);
   float step=4*size;
@@ -130,39 +155,50 @@ public sealed class Renderer : IDisposable {
    Text(sub,x,y+78,18,Color.FromArgb(198,204,208));
    Box(x,y+108,560,2,Color.FromArgb(90,255,139,74));
   }
-  void MenuItem(string label,string hint,RectangleF r,int index){
-   bool hover=r.Contains(game.Input.Aim.X,game.Input.Aim.Y);
-   bool active=hover||game.Menu==index;
-   Box(r.X,r.Y,r.Width,r.Height,Color.FromArgb(active?62:24,18,18,30));
-   Box(r.X,r.Y,r.Width,2,active?Palette.Gold:Color.FromArgb(90,255,139,74));
-   Box(r.X,r.Y,5,r.Height,active?Palette.Gold:Palette.Ember);
-   Bold((active?"> ":"  ")+label,r.X+22,r.Y+16,22,active?Color.White:Palette.Ash);
-   if(hint.Length>0)Text(hint,r.Right-104,r.Y+20,16,active?Palette.Gold:Palette.Muted);
-  }
-  void MenuCard(string key,string title,string detail,RectangleF r,int index){
-   bool hover=r.Contains(game.Input.Aim.X,game.Input.Aim.Y);
-   bool active=hover||game.Menu==index;
-   Box(r.X,r.Y,r.Width,r.Height,Color.FromArgb(active?68:26,18,18,30));
-   Box(r.X,r.Y,r.Width,2,active?Palette.Gold:Color.FromArgb(80,112,214,205));
-   Box(r.X,r.Y,6,r.Height,active?Palette.Gold:Palette.Ember);
-   Bold(key,r.X+24,r.Y+29,32,active?Palette.Gold:Palette.Muted);
-   Bold(title,r.X+86,r.Y+19,24,active?Color.White:Palette.Ash);
-   Text(detail,r.X+86,r.Y+58,17,active?Color.FromArgb(220,255,205,116):Palette.Muted);
-   if(active)Text("SELECTED",r.Right-124,r.Y+64,15,Palette.Gold);
-  }
-  void ContextFooter(string message){Box(0,670,Game.Width,50,Palette.Ink);Text(message,28,678,14,Palette.Muted);}
-  void Footer(){ContextFooter("A/D MOVE  SPACE JUMP  MOUSE AIM + FIRE  SHIFT/RMB DASH  Q FLASK  E GATE  S DROP");}
+   void MenuItem(string label,string hint,RectangleF r,int index){
+    bool hover=r.Contains(game.Input.Aim.X,game.Input.Aim.Y);
+    bool active=hover||game.Menu==index;
+    Box(r.X,r.Y,r.Width,r.Height,Color.FromArgb(active?62:24,18,18,30));
+    Box(r.X,r.Y,r.Width,2,active?Palette.Gold:Color.FromArgb(90,255,139,74));
+    Box(r.X,r.Y,5,r.Height,active?Palette.Gold:Palette.Ember);
+    string shown=(active?"> ":"  ")+label;float labelX=r.X+22;
+    Bold(shown,labelX,r.Y+16,20,active?Color.White:Palette.Ash);
+    if(hint.Length>0){
+     float hintWidth=Measure(hint,14,false);float hintX=r.Right-18-hintWidth;
+     if(hintX>=labelX+Measure(shown,20,true)+12)Text(hint,hintX,r.Y+20,14,active?Palette.Gold:Palette.Muted);
+    }
+   }
+   void MenuCard(string key,string title,string detail,RectangleF r,int index){
+    bool hover=r.Contains(game.Input.Aim.X,game.Input.Aim.Y);
+    bool active=hover||game.Menu==index;
+    Box(r.X,r.Y,r.Width,r.Height,Color.FromArgb(active?68:26,18,18,30));
+    Box(r.X,r.Y,r.Width,2,active?Palette.Gold:Color.FromArgb(80,112,214,205));
+    Box(r.X,r.Y,6,r.Height,active?Palette.Gold:Palette.Ember);
+    Bold(key,r.X+24,r.Y+29,32,active?Palette.Gold:Palette.Muted);
+    Bold(title,r.X+86,r.Y+19,24,active?Color.White:Palette.Ash);
+    Text(detail,r.X+86,r.Y+58,16,active?Color.FromArgb(220,255,205,116):Palette.Muted);
+    if(active){
+     float badgeWidth=Measure("SELECTED",14,false);float badgeX=r.Right-18-badgeWidth;
+     if(badgeX>=r.X+86+Measure(detail,16,false)+12)Text("SELECTED",badgeX,r.Y+64,14,Palette.Gold);
+    }
+   }
+   void ContextFooter(string message){Box(0,670,Game.Width,50,Palette.Ink);Text(message,28,678,14,Palette.Muted);}
+   void Footer(){
+    Box(0,670,Game.Width,50,Palette.Ink);
+    Text("A/D MOVE  SPACE JUMP  MOUSE AIM + FIRE  SHIFT/RMB DASH  Q FLASK  E GATE  S DROP",28,678,13,Palette.Muted);
+    TextRight("ESC PAUSE  M SOUND  F11",1252,678,13,Palette.Muted);
+   }
   void Title(){
    Box(0,0,Game.Width,Game.Height,Color.FromArgb(84,6,6,14));
    Sparks(0,40,1280,620);
    Frame(58,54,600,590,Palette.Ember);
    Text("AN ORIGINAL DARK FANTASY RUN-AND-GUN",88,88,15,Palette.Ember);
    Sigil(556,112);
-   Bold("ASHENBOUND",86,150,78,Color.White);
-   Bold("THE LAST CINDER",88,226,54,Palette.Ember);
-   Box(90,300,520,2,Color.FromArgb(110,255,139,74));
-   Text("THE SUN HAS BEEN DEAD FOR THREE WINTERS.",90,324,20,Palette.Gold);
-   Text("Carry the Last Cinder through three ruined sanctums.\nBreak the Cinder Bishop's choir. Give the world one more dawn.",90,364,19,Color.FromArgb(200,204,208));
+    Bold("ASHENBOUND",86,150,68,Color.White);
+    Bold("THE LAST CINDER",88,226,48,Palette.Ember);
+    Box(90,300,520,2,Color.FromArgb(110,255,139,74));
+    Text("THE SUN HAS BEEN DEAD FOR THREE WINTERS.",90,324,19,Palette.Gold);
+    TextWrap("Carry the Last Cinder through three ruined sanctums. Break the Cinder Bishop's choir. Give the world one more dawn.",90,360,520,17,24,Color.FromArgb(200,204,208));
    Actor(new V(360,548),new V(1,0),3,0);
    Box(58,600,600,3,Palette.Ember);
    Text("VEYRA / EMBER BEARER",88,612,16,Palette.Muted);
@@ -196,15 +232,15 @@ public sealed class Renderer : IDisposable {
    Box(350,133,580,8,Color.FromArgb(68,36,48));
    Box(350,133,580*Math.Max(0,e.Hp/e.MaxHp),8,Campaign.Accent(game.Room));
   }
-  Footer();Text("ESC PAUSE / M SOUND / F11",995,678,14,Palette.Muted);
+  Footer();
  }
   void StoryPage(){
    Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
    Frame(248,124,784,526,Palette.Gold);
    Header("SANCTUM "+(game.Room+1)+" / "+Campaign.TotalRooms,"THE LAST CINDER",Campaign.Speakers[Math.Min(game.Room,3)],294,152);
-   Sparks(248,300,784,260);
-   Text(Campaign.Scenes[Math.Min(game.Room,3)],298,282,19,Color.FromArgb(214,214,216));
-   MenuItem("CONTINUE","ENTER",MenuLayout.Story[0],0);
+    Sparks(248,300,784,260);
+    TextWrap(Campaign.Scenes[Math.Min(game.Room,3)],298,276,724,17,24,Color.FromArgb(214,214,216));
+    MenuItem("CONTINUE","ENTER",MenuLayout.Story[0],0);
    ContextFooter("ENTER / CLICK TO CONTINUE   J REOPENS THE PAGE IN PLAY");
   }
   void Upgrades(){
@@ -231,13 +267,20 @@ public sealed class Renderer : IDisposable {
    Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
    Frame(220,100,840,525,Palette.Cyan);
    Header("FIELD MANUAL","HOW TO SURVIVE THE ASH","Controls and cinder-lore for the bearer.",266,132);
-   Text("MOVEMENT",266,264,16,Palette.Gold);
-   Text("A / D  or  LEFT / RIGHT      MOVE\nSPACE / W / UP               JUMP\nS / DOWN                     DROP THROUGH LEDGES\nSHIFT / RIGHT MOUSE          DASH WITH BRIEF I-FRAMES",266,290,17,Color.FromArgb(206,204,208));
-   Text("COMBAT",650,264,16,Palette.Gold);
-   Text("MOUSE                        AIM\nLEFT CLICK                   FIRE\nQ                            THROW A CINDER FLASK\nE                            OPEN A CLEARED GATE\nJ                            REOPEN THE CURRENT SCENE",650,290,17,Color.FromArgb(206,204,208));
-   Box(266,430,724,2,Color.FromArgb(90,255,139,74));
-   Text("CINDER RULES",266,448,16,Palette.Gold);
-   Text("Chain kills quickly to overcharge the Trigger and heal on every takedown.\nBreak every foe before the gate opens. Walls hold them inside the sanctum.\nDashes ignore hits. Flasks explode on impact. Stay ahead of the Bishop's choir.",266,474,17,Palette.Ash);
+    Text("MOVEMENT",266,264,16,Palette.Gold);
+    Guide("A / D","MOVE",266,292);
+    Guide("SPACE / W","JUMP",266,320);
+    Guide("S / DOWN","DROP THROUGH LEDGES",266,348);
+    Guide("SHIFT / RMB","DASH WITH I-FRAMES",266,376);
+    Text("COMBAT",650,264,16,Palette.Gold);
+    Guide("MOUSE","AIM",650,292);
+    Guide("LEFT CLICK","FIRE",650,320);
+    Guide("Q","CINDER FLASK",650,348);
+    Guide("E","OPEN CLEARED GATE",650,376);
+    Guide("J","REOPEN SCENE",650,404);
+    Box(266,430,724,2,Color.FromArgb(90,255,139,74));
+    Text("CINDER RULES",266,448,16,Palette.Gold);
+    TextWrap("Chain kills quickly to overcharge the Trigger and heal on every takedown. Break every foe before the gate opens. Walls hold them inside the sanctum. Dashes ignore hits. Flasks explode on impact. Stay ahead of the Bishop's choir.",266,474,724,15,22,Palette.Ash);
    MenuItem("BACK","ESC",MenuLayout.Help[0],0);
    ContextFooter("ESC / ENTER TO RETURN");
   }
@@ -249,9 +292,16 @@ public sealed class Renderer : IDisposable {
    Box(346,310,588,76,Color.FromArgb(28,20,24));
    Bold("SCORE "+game.Score,364,322,23,Palette.Gold);
    Text("BEST CHAIN "+game.BestChain+"     SILENCED "+game.Kills+"     VIGIL "+(game.Seed&65535).ToString("X4"),364,360,17,Palette.Muted);
-   MenuItem("NEW VIGIL","ENTER",MenuLayout.End[0],0);
-   MenuItem("RETURN TO TITLE","",MenuLayout.End[1],1);
-   ContextFooter("W/S SELECT   ENTER CONFIRM");
-  }
-}
+    MenuItem("NEW VIGIL","ENTER",MenuLayout.End[0],0);
+    MenuItem("RETURN TO TITLE","",MenuLayout.End[1],1);
+    ContextFooter("W/S SELECT   ENTER CONFIRM");
+   }
+   void CursorMark(){
+    V a=game.Input.Aim;Color c=game.State==Stage.Playing?Palette.Cyan:Palette.Gold;
+    Ring(a.X,a.Y,13,c,2);Ring(a.X,a.Y,5,Palette.Gold,1);
+    Line(a.X-20,a.Y,a.X-8,a.Y,c,2);Line(a.X+8,a.Y,a.X+20,a.Y,c,2);
+    Line(a.X,a.Y-20,a.X,a.Y-8,c,2);Line(a.X,a.Y+8,a.X,a.Y+20,c,2);
+    Circle(a.X,a.Y,2,Color.White);
+   }
+ }
 }
