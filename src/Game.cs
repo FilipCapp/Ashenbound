@@ -6,7 +6,8 @@ public class Enemy {
  public V P;public int Kind;public float Hp,MaxHp,Time,Fire,Hit,Mode;
 }
 public class Bullet {
- public V P,Velocity;public bool Hostile;public float Damage,Life,Gravity;public int Kind;
+ public V P,Velocity;public bool Hostile;public float Damage,Life,Gravity;public int Kind,Pierce;
+ public readonly List<Enemy> Hit=new List<Enemy>();
 }
 public class Particle {
  public V P,Velocity;public Color Color;public float Life,Max;
@@ -15,13 +16,13 @@ public class Hazard {
  public RectangleF Bounds;public int Kind;public float Timer;public bool Active;public float Life;
 }
  public class Game {
-  public const float Floor=620,Width=1280,Height=720,EnemyMargin=44f;
+   public const float Floor=620,Width=1280,Height=720,EnemyMargin=44f,SunriseDuration=6f;
   public const int FireballSound=0,HitSound=1,ClearSound=2,HurtSound=3,DashSound=4,FlaskSound=5;
   public const int MasterVolumeIndex=0,MusicVolumeIndex=1,SfxVolumeIndex=2;
   public Stage State=Stage.Title,HelpReturn=Stage.Title;
   public int Menu,AudioSlider;
-  public bool SoundOn=true,AudioDragging;
-  public readonly float[] Volume={1f,.8f,1f};
+   public bool SoundOn=true,AudioDragging;
+   public readonly float[] Volume={1f,.8f,.65f};
   public Action<int> RoomEntered;
  public readonly Controls Input=new Controls();
  public V Player,Velocity,Aim=new V(1,0);
@@ -30,21 +31,45 @@ public class Hazard {
  public float Invulnerable,DashTime,DashCooldown,FireCooldown,FlaskCooldown;
  public float ChainTime,MultiWindow,Shake,Elapsed,RoomTime;
  public int Chain,BestChain,Flasks=3;
- public int Room,Score,Kills,Seed,Pending,UpgradeCount;
+  public int Room,Score,Kills,Seed,Pending,UpgradeCount,Difficulty;
  public string Toast="";public float ToastTime;
  public readonly List<RectangleF> Platforms=new List<RectangleF>();
  public readonly List<Enemy> Enemies=new List<Enemy>();
  public readonly List<Bullet> Bullets=new List<Bullet>();
  public readonly List<Particle> Particles=new List<Particle>();
  public readonly List<Hazard> Hazards=new List<Hazard>();
- Rng random=new Rng(1);float spawn;public Action<int> PlaySound;
- public bool Overcharged{get{return Chain>=8;}}
- public void Start(int seed){
-  Seed=seed;Menu=0;HelpReturn=Stage.Title;random=new Rng(seed);Room=Score=Kills=Chain=BestChain=UpgradeCount=0;
-  Health=MaxHealth=100;Damage=26;FireRate=.15f;Speed=315;Flasks=3;Elapsed=0;Ending=false;
-  EnterRoom();State=Stage.Story;
- }
- public void ContinueStory(){if(State!=Stage.Story)return;State=Ending?Stage.Won:Stage.Playing;Menu=0;Input.Fire=false;Input.ClearEdges();}
+  Rng random=new Rng(1);float spawn;public Action<int> PlaySound;
+  Rng relicRandom=new Rng(1);
+  public readonly RelicKind[] UpgradeChoices=new RelicKind[3];
+  public float SunriseTime,FlaskRadius=1f,DashCooldownScale=1f,DamageTakenScale=1f,HealPerKill;
+  public int Pierce,SideShots;
+   public Game(){Difficulty=Campaign.DefaultDifficulty;relicRandom=new Rng(1);RollUpgrades();}
+   public bool Overcharged{get{return Chain>=8;}}
+   public void Start(int seed){Start(seed,Difficulty);}
+   public void Start(int seed,int difficulty){
+    Difficulty=(int)Clamp(difficulty,0,Campaign.Difficulties.Length-1);
+    Seed=seed;Menu=0;HelpReturn=Stage.Title;random=new Rng(seed);relicRandom=new Rng(seed^0x5F3759DF);Room=Score=Kills=Chain=BestChain=UpgradeCount=0;
+   Health=MaxHealth=100;Damage=26;FireRate=.15f;Speed=315;Flasks=3;Elapsed=0;Ending=false;
+   Pierce=0;SideShots=0;FlaskRadius=1f;DashCooldownScale=1f;DamageTakenScale=1f;HealPerKill=0;SunriseTime=0;
+   RollUpgrades();EnterRoom();State=Stage.Story;
+  }
+  public void ContinueStory(){
+   if(State!=Stage.Story)return;
+   State=Ending?Stage.Sunrise:Stage.Playing;SunriseTime=0;Menu=0;Input.Fire=false;Input.ClearEdges();
+  }
+  public void SkipSunrise(){
+   if(State!=Stage.Sunrise)return;
+   SunriseTime=SunriseDuration;State=Stage.Won;Menu=0;Input.ClearEdges();
+  }
+  public void RollUpgrades(){
+   List<int> pool=new List<int>();
+   for(int i=0;i<Campaign.Upgrades.Length;i++)pool.Add(i);
+   for(int i=0;i<UpgradeChoices.Length;i++){
+    int pick=relicRandom.Next(0,pool.Count);
+    UpgradeChoices[i]=Campaign.Upgrades[pool[pick]].Kind;
+    pool.RemoveAt(pick);
+   }
+  }
  public void EnterRoom(){
   Platforms.Clear();Enemies.Clear();Bullets.Clear();Particles.Clear();Hazards.Clear();
   Player=new V(95,Floor-24);Velocity=new V();Aim=new V(1,0);Grounded=true;
@@ -76,38 +101,66 @@ public class Hazard {
   RectangleF b=kind==0?new RectangleF(x,Floor-16,64,16):new RectangleF(x,180,28,Floor-180);
   Hazards.Add(new Hazard{Bounds=b,Kind=kind,Timer=kind==1?1.8f:0,Active=kind==0,Life=life});
  }
- public void Spawn(int kind,V p){
-  float hp=kind==3?1100:kind==0?58:kind==1?44:72;
-  Enemies.Add(new Enemy{P=p,Kind=kind,Hp=hp,MaxHp=hp,Fire=kind==3?1.2f:.8f+(float)random.NextDouble()});
- }
+  public void Spawn(int kind,V p){
+   float hp=(kind==3?1100:kind==0?58:kind==1?44:72)*Campaign.Difficulties[Difficulty].EnemyHp;
+   Enemies.Add(new Enemy{P=p,Kind=kind,Hp=hp,MaxHp=hp,Fire=kind==3?1.2f:.8f+(float)random.NextDouble()});
+  }
  public void Pause(){if(State==Stage.Playing){State=Stage.Paused;Menu=0;}else if(State==Stage.Paused){State=Stage.Playing;Menu=0;}}
  public void MoveMenu(int delta,int count){if(count>0)Menu=((Menu+delta)%count+count)%count;}
  public void ShowHelp(){if(State==Stage.Help)return;HelpReturn=State;State=Stage.Help;Menu=0;Input.Fire=false;Input.ClearEdges();}
  public void CloseHelp(){State=HelpReturn==Stage.Help?Stage.Title:HelpReturn;Menu=0;Input.Fire=false;Input.ClearEdges();}
   public void ToggleSound(){SoundOn=!SoundOn;}
   public void ShowAudio(){if(State==Stage.Audio)return;HelpReturn=State;State=Stage.Audio;Menu=AudioSlider;Input.Fire=false;Input.ClearEdges();}
-  public void CloseAudio(){State=HelpReturn==Stage.Audio?Stage.Title:HelpReturn;Menu=0;Input.Fire=false;Input.ClearEdges();}
-  public void SetVolume(int index,float value){if(index<0||index>2)return;Volume[index]=Clamp(value,0,1);}
+   public void CloseAudio(){State=HelpReturn==Stage.Audio?Stage.Title:HelpReturn;Menu=0;Input.Fire=false;Input.ClearEdges();}
+   public void ShowAbilities(){if(State==Stage.Abilities)return;HelpReturn=State;State=Stage.Abilities;Menu=0;Input.Fire=false;Input.ClearEdges();}
+   public void CloseAbilities(){State=HelpReturn==Stage.Abilities?Stage.Title:HelpReturn;Menu=0;Input.Fire=false;Input.ClearEdges();}
+   public void ShowDifficulty(){if(State==Stage.Difficulty)return;HelpReturn=State;State=Stage.Difficulty;Menu=Campaign.DefaultDifficulty;Input.Fire=false;Input.ClearEdges();}
+   public void CloseDifficulty(){State=HelpReturn==Stage.Difficulty?Stage.Title:HelpReturn;Menu=0;Input.Fire=false;Input.ClearEdges();}
+   public void SetVolume(int index,float value){if(index<0||index>2)return;Volume[index]=Clamp(value,0,1);}
   public void AdjustVolume(int index,float delta){SetVolume(index,Volume[index]+delta);}
   public void ReturnToTitle(){State=Stage.Title;Menu=0;Input.Fire=false;Input.ClearEdges();}
- public void SelectUpgrade(int n){
-  if(State!=Stage.Upgrade||n<0||n>2)return;
-  if(n==0)Damage*=1.15f;
-  else if(n==1){MaxHealth+=30;Health=Math.Min(MaxHealth,Health+55);}
-  else{FireRate=Math.Max(.07f,FireRate*.9f);Speed=Math.Min(405,Speed+12);}
-  UpgradeCount++;Room++;EnterRoom();State=Stage.Story;Menu=0;Sound(ClearSound);
- }
- public void Hurt(float amount){
-  if(State!=Stage.Playing||Invulnerable>0)return;
-  Health=Math.Max(0,Health-amount);Invulnerable=.85f;
+  public void SelectUpgrade(int n){
+   if(State!=Stage.Upgrade||n<0||n>=UpgradeChoices.Length)return;
+   ApplyUpgrade(UpgradeChoices[n]);
+   UpgradeCount++;Room++;RollUpgrades();EnterRoom();State=Stage.Story;Menu=0;Sound(ClearSound);
+  }
+  public void ApplyUpgrade(RelicKind kind){
+   switch(kind){
+    case RelicKind.Damage:Damage*=1.15f;break;
+    case RelicKind.Vitality:MaxHealth+=30;Health=Math.Min(MaxHealth,Health+55);break;
+    case RelicKind.Swift:FireRate=Math.Max(.07f,FireRate*.9f);Speed=Math.Min(405,Speed+12);break;
+    case RelicKind.Pierce:Pierce=Math.Min(3,Pierce+1);break;
+    case RelicKind.Split:SideShots=2;break;
+    case RelicKind.Flask:Flasks++;FlaskRadius=Math.Min(1.6f,FlaskRadius+.25f);break;
+    case RelicKind.Dash:DashCooldownScale=Math.Max(.5f,DashCooldownScale-.22f);break;
+    case RelicKind.Siphon:HealPerKill+=4;break;
+    case RelicKind.Ward:DamageTakenScale=Math.Max(.65f,DamageTakenScale-.2f);break;
+   }
+  }
+   public void Hurt(float amount){
+    if(State!=Stage.Playing||Invulnerable>0)return;
+    float damage=Math.Max(1,(int)Math.Ceiling(amount*DamageTakenScale*Campaign.Difficulties[Difficulty].IncomingDamage));
+    Health=Math.Max(0,Health-damage);Invulnerable=.85f;
   Chain=0;ChainTime=0;MultiWindow=0;Shake=9;
    Burst(Player,Palette.Blood,20);Sound(HurtSound);
   if(Health<=0)State=Stage.Dead;
  }
- void Sound(int n){if(PlaySound!=null)PlaySound(n);}
- public void Step(float dt){
-  if(State!=Stage.Playing){Input.ClearEdges();return;}
-  dt=Math.Min(dt,.025f);
+  void Sound(int n){if(PlaySound!=null)PlaySound(n);}
+  void ShootFireball(V origin,V direction,float damage){
+   Bullets.Add(new Bullet{P=origin,Velocity=direction*1000,Life=1.3f,Damage=damage,Kind=0,Pierce=Pierce});
+  }
+  static V Rotate(V v,float angle){
+   float c=(float)Math.Cos(angle),s=(float)Math.Sin(angle);
+   return new V(v.X*c-v.Y*s,v.X*s+v.Y*c);
+  }
+  public void Step(float dt){
+   if(State==Stage.Sunrise){
+    SunriseTime=Math.Min(SunriseDuration,SunriseTime+dt);
+    if(SunriseTime>=SunriseDuration)State=Stage.Won;
+    Input.ClearEdges();return;
+   }
+   if(State!=Stage.Playing){Input.ClearEdges();return;}
+   dt=Math.Min(dt,.025f);
   Elapsed+=dt;RoomTime+=dt;ToastTime-=dt;Invulnerable-=dt;
   DashCooldown-=dt;FireCooldown-=dt;FlaskCooldown-=dt;Shake=Math.Max(0,Shake-dt*28);
   ChainTime-=dt;if(ChainTime<=0){Chain=0;ChainTime=0;MultiWindow=0;}
@@ -117,7 +170,7 @@ public class Hazard {
   if(Input.Jump&&Grounded){Velocity.Y=-780;Grounded=false;Burst(Player,Palette.Cyan,8);}
   if(Input.Down&&!Input.Jump&&Grounded&&Player.Y<Floor-26){Player.Y+=20;Grounded=false;}
    if(Input.Dash&&DashCooldown<=0){
-    DashTime=.15f;DashCooldown=1.15f;Invulnerable=Math.Max(Invulnerable,DashTime+.5f);
+     DashTime=.15f;DashCooldown=Math.Max(.55f,1.15f*DashCooldownScale);Invulnerable=Math.Max(Invulnerable,DashTime+.5f);
     Velocity=new V((horizontal==0?(Aim.X>=0?1:-1):horizontal)*920,0);
     Burst(Player,Palette.Cyan,18);Sound(DashSound);
    }
@@ -131,12 +184,17 @@ public class Hazard {
    }
   if(Player.Y>820)Hurt(200);
   float rate=FireRate*(Overcharged?.85f:1f);
-  if(Input.Fire&&FireCooldown<=0){
-   FireCooldown=rate;
-   float damage=Damage*(Overcharged?1.35f:1f);
-   Bullets.Add(new Bullet{P=Player+new V(0,-13)+Aim*29,Velocity=Aim*1000,Life=1.3f,Damage=damage,Kind=0});
-    Burst(Player+new V(0,-13)+Aim*32,Palette.Gold,3);Sound(FireballSound);
-  }
+   if(Input.Fire&&FireCooldown<=0){
+    FireCooldown=rate;
+    float damage=Damage*(Overcharged?1.35f:1f);
+    V muzzle=Player+new V(0,-13);
+    ShootFireball(muzzle+Aim*29,Aim,damage);
+    if(SideShots>0){
+     ShootFireball(muzzle+Aim*29,Rotate(Aim,-.16f),damage*.55f);
+     ShootFireball(muzzle+Aim*29,Rotate(Aim,.16f),damage*.55f);
+    }
+     Burst(muzzle+Aim*32,Palette.Gold,3);Sound(FireballSound);
+   }
   if(Input.Flask&&FlaskCooldown<=0&&Flasks>0){
    FlaskCooldown=.9f;Flasks--;
     Bullets.Add(new Bullet{P=Player+new V(0,-13)+Aim*24,Velocity=Aim*620+new V(0,-260),Life=2.2f,Damage=70,Gravity=900,Kind=1});
@@ -222,15 +280,18 @@ public class Hazard {
    if(b.Kind==1&&b.P.Y>=Floor-6&&b.Velocity.Y>0){Explode(b.P,b.Damage);remove=true;}
    if(b.Hostile){
     if(SegmentDistance(old,b.P,Player)<21){Hurt(b.Damage);remove=true;}
-   } else if(b.Kind==0){
-    for(int j=Enemies.Count-1;j>=0;j--){
-     Enemy e=Enemies[j];
-     if(SegmentDistance(old,b.P,e.P)<(e.Kind==3?53:24)){
-      e.Hp-=b.Damage;e.Hit=.09f;Burst(b.P,Palette.Ember,6);remove=true;
-      if(e.Hp<=0){KillEnemy(j,e);}break;
+    } else if(b.Kind==0){
+     for(int j=Enemies.Count-1;j>=0;j--){
+      Enemy e=Enemies[j];
+      if(b.Hit.Contains(e))continue;
+      if(SegmentDistance(old,b.P,e.P)<(e.Kind==3?53:24)){
+       e.Hp-=b.Damage;e.Hit=.09f;Burst(b.P,Palette.Ember,6);b.Hit.Add(e);
+       if(e.Hp<=0)KillEnemy(j,e);
+       if(b.Pierce>0)b.Pierce--;
+       else{remove=true;break;}
+      }
      }
     }
-   }
    if(remove)Bullets.RemoveAt(i);
   }
  }
@@ -239,14 +300,14 @@ public class Hazard {
   Chain++;BestChain=Math.Max(BestChain,Chain);ChainTime=4.2f;
   MultiWindow=.55f;multiCount++;
   if(multiCount>=2){ChainTime+=1.4f;multiCount=0;}
-  Health=Math.Min(MaxHealth,Health+3);
+   Health=Math.Min(MaxHealth,Health+3+HealPerKill);
   Burst(e.P,e.Kind==3?Palette.Gold:Palette.Ember,32);Shake=4;Sound(1);
  }
  void Explode(V p,float damage){
   Burst(p,Palette.Ember,30);Shake=7;Sound(1);
   for(int j=Enemies.Count-1;j>=0;j--){
    Enemy e=Enemies[j];
-   if((e.P-p).Length<(e.Kind==3?105:92)){
+    if((e.P-p).Length<(e.Kind==3?105:92)*FlaskRadius){
     e.Hp-=damage;e.Hit=.12f;
     if(e.Hp<=0)KillEnemy(j,e);
    }

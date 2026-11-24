@@ -7,8 +7,12 @@ public static class Tests {
  static int checks;
  static void Check(bool ok,string name){if(!ok)throw new Exception("FAIL: "+name);checks++;}
  static void Steps(Game g,int n){for(int i=0;i<n;i++)g.Step(1f/120);}
- static Game Fresh(){Game g=new Game();g.Start(12345);g.ContinueStory();return g;}
- static void Image(Renderer r,Game g,string name){
+  static Game Fresh(){Game g=new Game();g.Start(12345);g.ContinueStory();return g;}
+  static void Choose(Game g,RelicKind kind){
+   for(int i=0;i<g.UpgradeChoices.Length;i++)if(g.UpgradeChoices[i]==kind){g.SelectUpgrade(i);return;}
+   g.UpgradeChoices[0]=kind;g.SelectUpgrade(0);
+  }
+  static void Image(Renderer r,Game g,string name){
   using(Bitmap b=new Bitmap(1280,720))using(Graphics gr=Graphics.FromImage(b)){
    r.Draw(gr,g,1280,720,2.5f);b.Save(Path.Combine("Tests",name+".png"));
    Check(b.GetPixel(20,20).ToArgb()!=Color.Black.ToArgb(),"render "+name);
@@ -34,13 +38,75 @@ public static class Tests {
    Game same=new Game();same.Start(12345);same.ContinueStory();Steps(same,120);
    Check(same.Enemies.Count==1,"seeded spawn occurs");
    Game sameAgain=new Game();sameAgain.Start(12345);sameAgain.ContinueStory();Steps(sameAgain,120);
-   Check(sameAgain.Enemies.Count==same.Enemies.Count&&sameAgain.Enemies[0].Kind==same.Enemies[0].Kind,"seeded spawn repeatable");
-   bool sawWalker=false,sawWisp=false;
+    Check(sameAgain.Enemies.Count==same.Enemies.Count&&sameAgain.Enemies[0].Kind==same.Enemies[0].Kind,"seeded spawn repeatable");
+    Check(SoundData.Rate==22050&&SoundData.LoopSeconds==16&&SoundData.TrackCount==5,"pcm loop format");
+    bool seams=true;
+    for(int t=0;t<SoundData.TrackCount;t++)if(SoundData.MusicSeam(t)>.03f)seams=false;
+    Check(seams,"pcm music loops without audible seam");
+    float fireStart=SoundData.EffectSample(0,Game.FireballSound,0);
+    float fireEnd=SoundData.EffectSample(0,Game.FireballSound,SoundData.EffectLength(Game.FireballSound)-1);
+    bool firePeak=false;
+    for(int i=0;i<SoundData.EffectLength(Game.FireballSound);i++)if(Math.Abs(SoundData.EffectSample(0,Game.FireballSound,i))>.15f)firePeak=true;
+    Check(Math.Abs(fireStart)<.02f&&Math.Abs(fireEnd)<.02f&&firePeak,"fireball burst is shaped without clicks");
+    using(PcmMixer mixer=new PcmMixer(false)){
+     mixer.SetMusic(Audio.MenuTrack);float[] buffer=new float[512];mixer.Render(buffer);
+     Check(mixer.MusicPlaying&&mixer.ActiveTrack==Audio.MenuTrack&&!mixer.CrossfadeActive,"pcm music starts");
+     mixer.SetMusic(Audio.DawnTrack);mixer.Render(buffer);
+     Check(mixer.CrossfadeActive&&mixer.ActiveTrack==Audio.DawnTrack&&mixer.FadeProgress>0&&mixer.FadeProgress<1,"pcm track change crossfades");
+     mixer.Play(Game.FireballSound);mixer.Render(buffer);
+     Check(mixer.ActiveVoices==1,"pcm fireball overlaps music");
+     float[] tail=new float[128];int renders=SoundData.EffectLength(Game.FireballSound)/128+4;
+     for(int i=0;i<renders;i++)mixer.Render(tail);
+     Check(mixer.ActiveVoices==0,"pcm voices expire");
+      mixer.SetMusic(-1);mixer.Render(buffer);
+      Check(!mixer.MusicPlaying&&mixer.ActiveTrack==-1,"pcm music stops cleanly");
+      mixer.SetMusic(Audio.MenuTrack);mixer.Render(buffer);
+      mixer.SetMusic(-1);mixer.Render(buffer);
+      float stopFade=mixer.FadeProgress;
+      mixer.SetMusic(-1);mixer.SetMusic(-1);mixer.Render(buffer);
+      Check(mixer.FadeProgress>stopFade&&mixer.CrossfadeActive,"repeated stop keeps fading out");
+      mixer.SetGains(1,.5f,.25f);mixer.SetMuted(true);
+     Check(mixer.MasterGain==0&&mixer.MusicGain==0&&mixer.SfxGain==0,"pcm mute silences buses");
+    }
+    Game pilgrim=new Game();pilgrim.Start(1,0);pilgrim.ContinueStory();pilgrim.Enemies.Clear();
+    Game nightmare=new Game();nightmare.Start(1,3);nightmare.ContinueStory();nightmare.Enemies.Clear();
+    pilgrim.Spawn(0,new V(400,Game.Floor-24));nightmare.Spawn(0,new V(400,Game.Floor-24));
+    Check(nightmare.Enemies[0].Hp>pilgrim.Enemies[0].Hp*2,"difficulty scales enemy health");
+    nightmare.Invulnerable=0;float nightmareBefore=nightmare.Health;nightmare.Hurt(10);
+    Check(Math.Abs((nightmareBefore-nightmare.Health)-19)<.001f,"difficulty scales incoming damage");
+    Game clamped=new Game();clamped.Start(1,-5);Check(clamped.Difficulty==0,"difficulty clamps low");
+    clamped.Start(1,99);Check(clamped.Difficulty==Campaign.Difficulties.Length-1,"difficulty clamps high");
+    pilgrim.Start(2);Check(pilgrim.Difficulty==0,"single-argument start keeps chosen difficulty");
+    bool sawWalker=false,sawWisp=false;
    for(int seed=0;seed<32;seed++){
     Game v=new Game();v.Start(seed);v.ContinueStory();Steps(v,120);
     if(v.Enemies.Count>0){if(v.Enemies[0].Kind==0)sawWalker=true;else sawWisp=true;}
    }
-    Check(sawWalker&&sawWisp,"seeds vary encounters");
+     Check(sawWalker&&sawWisp,"seeds vary encounters");
+     Check(Campaign.Upgrades.Length==9,"nine relics defined");
+     Game relicRoll=Fresh();
+     Check(relicRoll.UpgradeChoices.Length==3,"three relics offered");
+     bool distinct=true,known=true;
+     for(int i=0;i<relicRoll.UpgradeChoices.Length;i++){
+      for(int j=i+1;j<relicRoll.UpgradeChoices.Length;j++)if(relicRoll.UpgradeChoices[i]==relicRoll.UpgradeChoices[j])distinct=false;
+      bool inPool=false;
+      for(int k=0;k<Campaign.Upgrades.Length;k++)if(Campaign.Upgrades[k].Kind==relicRoll.UpgradeChoices[i])inPool=true;
+      if(!inPool)known=false;
+     }
+     Check(distinct,"relic offers are distinct");Check(known,"relic offers come from the pool");
+     string firstRoll=relicRoll.UpgradeChoices[0]+"/"+relicRoll.UpgradeChoices[1]+"/"+relicRoll.UpgradeChoices[2];
+     bool rollsVary=false;
+     for(int seed=0;seed<64;seed++){
+      Game roll=new Game();roll.Start(seed);
+      string set=roll.UpgradeChoices[0]+"/"+roll.UpgradeChoices[1]+"/"+roll.UpgradeChoices[2];
+      if(set!=firstRoll)rollsVary=true;
+     }
+     Check(rollsVary,"relic offers vary by seed");
+     Game dawn=Fresh();dawn.Ending=true;dawn.State=Stage.Story;dawn.ContinueStory();
+     Check(dawn.State==Stage.Sunrise&&dawn.SunriseTime==0,"epilogue opens sunrise");
+     Steps(dawn,60);Check(dawn.State==Stage.Sunrise&&dawn.SunriseTime>0,"sunrise advances");
+     Steps(dawn,700);Check(dawn.State==Stage.Won,"sunrise finishes after six seconds");
+     dawn.SkipSunrise();Check(dawn.State==Stage.Won,"skip is safe after sunrise");
 
     g=Fresh();g.Pending=0;g.Invulnerable=100000;g.Player=new V(Game.Width-60,Game.Floor-24);
     for(int kind=0;kind<3;kind++){
@@ -94,11 +160,42 @@ public static class Tests {
    g=Fresh();g.Player=new V(1190,Game.Floor-24);g.Pending=0;g.Enemies.Clear();g.ExitOpen=true;
    g.Input.Use=true;g.Step(1f/120);
    Check(g.State==Stage.Upgrade,"gate enters upgrade");
-   float damage=g.Damage;g.SelectUpgrade(0);
-   Check(g.Room==1&&g.Damage>damage&&g.UpgradeCount==1&&g.State==Stage.Story,"damage upgrade advances");
-   g.ContinueStory();g.State=Stage.Upgrade;g.Health=30;g.SelectUpgrade(1);
-   Check(g.Room==2&&g.MaxHealth==130&&g.Health==85,"health upgrade");
-   g.ContinueStory();Check(g.Room==2&&g.Enemies.Count==1&&g.Enemies[0].Kind==3,"boss room");
+    float damage=g.Damage;Choose(g,RelicKind.Damage);
+    Check(g.Room==1&&g.Damage>damage&&g.UpgradeCount==1&&g.State==Stage.Story,"damage upgrade advances");
+    g.ContinueStory();g.State=Stage.Upgrade;g.Health=30;Choose(g,RelicKind.Vitality);
+    Check(g.Room==2&&g.MaxHealth==130&&g.Health==85,"health upgrade");
+    g.ContinueStory();Check(g.Room==2&&g.Enemies.Count==1&&g.Enemies[0].Kind==3,"boss room");
+
+    Game relic=Fresh();relic.State=Stage.Upgrade;relic.Pending=0;relic.Enemies.Clear();
+    float baseRate=relic.FireRate,baseSpeed=relic.Speed;Choose(relic,RelicKind.Swift);
+    Check(relic.FireRate<baseRate&&relic.Speed>baseSpeed,"swift relic improves fire and movement");
+
+    relic=Fresh();relic.State=Stage.Upgrade;Choose(relic,RelicKind.Pierce);
+    Check(relic.Pierce==1,"pierce relic is applied");
+    relic.State=Stage.Playing;relic.Pending=0;relic.Enemies.Clear();relic.Invulnerable=100;
+    relic.Spawn(0,new V(400,Game.Floor-24));relic.Spawn(0,new V(500,Game.Floor-24));
+    relic.Bullets.Add(new Bullet{P=new V(380,Game.Floor-24),Velocity=new V(1000,0),Life=1,Damage=70,Kind=0,Pierce=relic.Pierce});
+    Steps(relic,24);Check(relic.Kills==2&&relic.Enemies.Count==0,"pierce fireball hits multiple foes");
+
+    relic=Fresh();relic.State=Stage.Upgrade;Choose(relic,RelicKind.Split);
+    relic.State=Stage.Playing;relic.Pending=0;relic.Bullets.Clear();relic.Input.Fire=true;relic.Step(1f/120);relic.Input.Fire=false;
+    Check(relic.Bullets.Count==3,"split relic fires three embers");
+
+    relic=Fresh();relic.State=Stage.Upgrade;Choose(relic,RelicKind.Flask);
+    Check(relic.Flasks==4&&relic.FlaskRadius>1,"flask relic adds stock and blast radius");
+
+    relic=Fresh();relic.State=Stage.Upgrade;Choose(relic,RelicKind.Dash);
+    relic.State=Stage.Playing;relic.Input.Dash=true;relic.Step(1f/120);relic.Input.Dash=false;
+    Check(relic.DashCooldown>0&&relic.DashCooldown<1.15f,"dash relic shortens recovery");
+
+    relic=Fresh();relic.State=Stage.Upgrade;Choose(relic,RelicKind.Siphon);
+    relic.State=Stage.Playing;relic.Health=50;relic.Pending=0;relic.Enemies.Clear();relic.Invulnerable=100;
+    relic.Spawn(0,new V(370,Game.Floor-24));KillAll(relic);
+    Check(relic.Health==57,"siphon relic increases takedown healing");
+
+    relic=Fresh();relic.State=Stage.Upgrade;Choose(relic,RelicKind.Ward);
+    relic.State=Stage.Playing;relic.Invulnerable=0;float wardHp=relic.Health;relic.Hurt(20);
+    Check(Math.Abs((wardHp-relic.Health)-16)<.001f,"ward relic reduces incoming damage");
 
    g=Fresh();g.Room=2;g.EnterRoom();g.ContinueStory();
    Enemy boss=g.Enemies[0];boss.Fire=.001f;boss.Hp=boss.MaxHp*.8f;Steps(g,10);
@@ -124,8 +221,9 @@ public static class Tests {
      g.ContinueStory();
     } else Check(g.Ending&&g.State==Stage.Story,"final gate opens epilogue");
    }
-   g.ContinueStory();Check(g.State==Stage.Won,"epilogue closes to victory");
-   Check(g.Kills==13,"campaign encounters completed");
+    g.ContinueStory();Check(g.State==Stage.Sunrise,"epilogue closes to sunrise");
+    g.SkipSunrise();Check(g.State==Stage.Won,"sunrise closes to victory");
+    Check(g.Kills==13,"campaign encounters completed");
 
    g=Fresh();g.Invulnerable=0;g.Hurt(150);
    Check(g.State==Stage.Dead&&g.Health==0,"death state");
@@ -137,7 +235,12 @@ public static class Tests {
     g.SetVolume(Game.MasterVolumeIndex,2);Check(g.Volume[Game.MasterVolumeIndex]==1,"volume clamps high");
     g.SetVolume(Game.SfxVolumeIndex,-1);Check(g.Volume[Game.SfxVolumeIndex]==0,"volume clamps low");
     g.CloseAudio();Check(g.State==Stage.Title,"audio returns to title");
+    g.ShowAbilities();Check(g.State==Stage.Abilities&&g.HelpReturn==Stage.Title,"abilities opens from title");
+    g.CloseAbilities();Check(g.State==Stage.Title,"abilities returns to title");
+    g.ShowDifficulty();Check(g.State==Stage.Difficulty&&g.Menu==Campaign.DefaultDifficulty,"difficulty opens with default tier");
+    g.CloseDifficulty();Check(g.State==Stage.Title,"difficulty returns to title");
     Check(Game.FireballSound==0&&Game.HitSound==1&&Game.ClearSound==2&&Game.HurtSound==3&&Game.DashSound==4&&Game.FlaskSound==5,"sound identifiers defined");
+    Check(Math.Abs(new Game().Volume[Game.SfxVolumeIndex]-.65f)<.001f,"sfx defaults to 65 percent");
     Check(Math.Abs(Game.SegmentDistance(new V(0,0),new V(100,0),new V(50,5))-5)<.01,"swept collision");
    Check(Campaign.Names.Length==3&&Campaign.Scenes.Length==4&&Campaign.Speakers.Length==4,"campaign content complete");
 
@@ -155,11 +258,16 @@ public static class Tests {
     Check(endingLabel+endingHint+52<=MenuLayout.Epilogue[0].Width,"epilogue hint fits");
     Check(MenuLayout.Items(Stage.Story,true)[0]==MenuLayout.Epilogue[0]&&MenuLayout.Items(Stage.Story,false)[0]==MenuLayout.Story[0],"epilogue owns its hit target");
     Check(MenuLayout.Items(Stage.Audio).Length==4,"audio menu has sliders and back");
+    Check(MenuLayout.Title.Length==5&&MenuLayout.Abilities.Length==1&&MenuLayout.Difficulty.Length==5,"expanded menu hit targets");
+    Check(MenuLayout.Items(Stage.Abilities).Length==1&&MenuLayout.Items(Stage.Difficulty).Length==5,"new menu states dispatch hit targets");
+    Check(Campaign.Difficulties.Length==4&&Campaign.DefaultDifficulty==1,"four difficulty tiers with bearer default");
     float footerLeft=r.TextWidth("A/D MOVE  SPACE JUMP  MOUSE AIM + FIRE  SHIFT/RMB DASH  Q FLASK  E GATE  S DROP",13,false);
     float footerRight=r.TextWidth("ESC PAUSE  M MUTE  F11",13,false);
     Check(28+footerLeft+20<=1252-footerRight,"footer controls fit");
     g.Menu=1;Image(r,g,"title-selected");
     g.ShowHelp();Image(r,g,"help");g.CloseHelp();
+    g.ShowAbilities();Image(r,g,"abilities");g.CloseAbilities();
+    g.ShowDifficulty();Image(r,g,"difficulty");g.CloseDifficulty();
     g.Start(9);Image(r,g,"story");g.ContinueStory();
     g.Spawn(0,new V(410,Game.Floor-24));g.Spawn(1,new V(810,320));g.Spawn(2,new V(1030,Game.Floor-24));
      g.Chain=5;g.ChainTime=3;Image(r,g,"combat");
@@ -171,13 +279,20 @@ public static class Tests {
       r.Draw(litGraphics,fire,1280,720,2.5f);
       Check(blank.GetPixel(640,300).ToArgb()!=lit.GetPixel(640,300).ToArgb(),"player fireball renders distinctly");
      }
-     g.State=Stage.Upgrade;Image(r,g,"upgrade");
+      g.State=Stage.Upgrade;Image(r,g,"upgrade");
+      foreach(UpgradeDef def in Campaign.Upgrades)Check(86+r.TextWidth(def.Name,24,true)+18<=MenuLayout.Upgrade[0].Width&&86+r.TextWidth(def.Detail,16,false)+18<=MenuLayout.Upgrade[0].Width,"relic card fits: "+def.Name);
+      foreach(UpgradeDef def in Campaign.Upgrades)Check(68+r.TextWidth(def.Name,17,true)+18<=270&&18+r.TextWidth(def.Detail,14,false)+18<=270,"ability card fits: "+def.Name);
+      foreach(DifficultyDef d in Campaign.Difficulties)Check(86+r.TextWidth(d.Name,21,true)+18<=MenuLayout.Difficulty[0].Width&&86+r.TextWidth(d.Detail,13,false)+18<=MenuLayout.Difficulty[0].Width,"difficulty card fits: "+d.Name);
+      Check(37+13<=MenuLayout.Difficulty[0].Height&&39+14<=MenuLayout.Difficulty[0].Height,"difficulty card text stays inside compact frame");
     for(int room=0;room<3;room++){
      g.Room=room;g.EnterRoom();g.State=Stage.Story;Image(r,g,"room"+room+"-story");
      g.ContinueStory();Image(r,g,"room"+room+"-world");
     }
     g.Room=2;g.EnterRoom();g.State=Stage.Playing;Image(r,g,"boss");
-    g.Ending=true;g.State=Stage.Story;Image(r,g,"epilogue");g.ContinueStory();Image(r,g,"victory");
+     g.Ending=true;g.State=Stage.Story;Image(r,g,"epilogue");g.ContinueStory();
+     Check(g.State==Stage.Sunrise,"epilogue render opens sunrise");Image(r,g,"sunrise");
+     r.ReduceMotion=true;Image(r,g,"sunrise-still");r.ReduceMotion=false;
+     g.SkipSunrise();Check(g.State==Stage.Won,"sunrise render completes");Image(r,g,"victory");
     g.State=Stage.Dead;Image(r,g,"death");g.State=Stage.Paused;g.Menu=0;Image(r,g,"pause");g.Menu=1;Image(r,g,"pause-selected");
     using(Bitmap b=new Bitmap(960,600))using(Graphics gr=Graphics.FromImage(b)){
      r.Draw(gr,g,960,600,2);b.Save("Tests/resized.png");
@@ -190,7 +305,8 @@ public static class Tests {
     Check(window.CursorHidden,"window hides system cursor");
     System.Reflection.MethodInfo key=typeof(Control).GetMethod("OnKeyDown",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
     System.Reflection.FieldInfo field=typeof(GameWindow).GetField("game",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-    System.Reflection.FieldInfo audioField=typeof(GameWindow).GetField("audio",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
+     System.Reflection.FieldInfo audioField=typeof(GameWindow).GetField("audio",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
+     System.Reflection.MethodInfo sync=typeof(GameWindow).GetMethod("SyncMusic");
      System.Reflection.MethodInfo mouse=typeof(Control).GetMethod("OnMouseDown",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
      System.Reflection.MethodInfo mouseMove=typeof(Control).GetMethod("OnMouseMove",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
      System.Reflection.MethodInfo mouseUp=typeof(Control).GetMethod("OnMouseUp",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
@@ -201,34 +317,46 @@ public static class Tests {
     Game model=(Game)field.GetValue(window);
     Audio audio=(Audio)audioField.GetValue(window);
     Check(model.State==Stage.Title&&model.Menu==0,"window opens title menu");
-    Check(!audio.AmbientPlaying,"ambient silent at title");
+     Check(!audio.AmbientPlaying&&audio.MenuPlaying&&audio.ActiveTrack==Audio.MenuTrack,"menu music plays at title");
     bool sound=model.SoundOn;press(Keys.M);Check(model.SoundOn!=sound,"window sound toggle");press(Keys.M);Check(model.SoundOn==sound,"window sound restored");
     press(Keys.S);Check(model.Menu==1,"menu keyboard navigation");
     press(Keys.W);Check(model.Menu==0,"menu navigation wraps");
     click(900,650,MouseButtons.Left);Check(model.State==Stage.Title,"click outside menu keeps title");
     click(900,341,MouseButtons.Left);Check(model.State==Stage.Help,"mouse activates field manual");
      press(Keys.Escape);Check(model.State==Stage.Title,"field manual returns to title");
-     press(Keys.S);press(Keys.S);press(Keys.Enter);Check(model.State==Stage.Audio,"audio settings open");
-     float musicBefore=model.Volume[Game.MusicVolumeIndex];
+      press(Keys.S);press(Keys.S);press(Keys.Enter);Check(model.State==Stage.Audio,"audio settings open");
+      Check(audio.MenuPlaying,"menu music plays in audio settings");
+      float musicBefore=model.Volume[Game.MusicVolumeIndex];
      press(Keys.S);press(Keys.A);
      Check(model.Volume[Game.MusicVolumeIndex]<musicBefore&&audio.MusicGain<musicBefore,"music slider lowers gain");
      press(Keys.D);
      click(900,370,MouseButtons.Left);Check(model.AudioDragging,"slider drag begins");
      drag(580,370);release();
      Check(!model.AudioDragging&&model.Volume[Game.MusicVolumeIndex]<.5f,"slider drag applies volume");
-     press(Keys.Escape);Check(model.State==Stage.Title,"audio returns to title");
-     press(Keys.Enter);Check(model.State==Stage.Story,"window starts story");
-    Check(audio.AmbientPlaying,"ambient starts with run");
-     click(900,650,MouseButtons.Left);Check(model.State==Stage.Playing,"mouse turns story page");
-     Check(audio.Theme==0,"nave ambient theme");
+      press(Keys.Escape);Check(model.State==Stage.Title,"audio returns to title");
+      press(Keys.S);press(Keys.S);press(Keys.S);press(Keys.Enter);
+      Check(model.State==Stage.Abilities&&audio.MenuPlaying,"abilities manual opens");
+      press(Keys.Escape);Check(model.State==Stage.Title,"abilities manual returns to title");
+      press(Keys.Enter);Check(model.State==Stage.Difficulty&&model.Menu==Campaign.DefaultDifficulty,"new vigil opens difficulty");
+      Check(audio.MenuPlaying&&!audio.AmbientPlaying,"menu music plays in difficulty");
+      press(Keys.Escape);Check(model.State==Stage.Title,"difficulty returns to title");
+      press(Keys.Enter);press(Keys.D1);
+      Check(model.State==Stage.Story&&model.Difficulty==0,"number key starts pilgrim vigil");
+      Check(audio.MenuPlaying&&!audio.AmbientPlaying,"menu music continues through story");
+      click(900,650,MouseButtons.Left);Check(model.State==Stage.Playing,"mouse turns story page");
+      Check(audio.AmbientPlaying&&audio.Theme==0&&audio.ActiveTrack==0,"nave ambient theme");
      model.Room=1;model.EnterRoom();Check(audio.Theme==1,"cloister ambient theme");
      model.Room=2;model.EnterRoom();Check(audio.Theme==2,"reliquary ambient theme");
-     model.Room=0;model.EnterRoom();Check(audio.Theme==0,"ambient theme returns");
-     audio.Play(Game.FireballSound);Check(audio.SfxGain>=0,"fireball sound prepared");
+      model.Room=0;model.EnterRoom();Check(audio.Theme==0,"ambient theme returns");
+      model.State=Stage.Sunrise;sync.Invoke(window,null);
+      Check(audio.DawnPlaying&&!audio.AmbientPlaying&&audio.ActiveTrack==Audio.DawnTrack,"dawn music plays at sunrise");
+      model.State=Stage.Won;sync.Invoke(window,null);Check(audio.DawnPlaying,"dawn music continues into victory record");
+      model.State=Stage.Playing;sync.Invoke(window,null);Check(audio.AmbientPlaying,"combat music resumes after sunrise");
+      audio.Play(Game.FireballSound);Check(audio.SfxGain>=0,"fireball sound prepared");
      press(Keys.J);Check(model.State==Stage.Story,"journal reopens scene");
     press(Keys.Enter);Check(model.State==Stage.Playing&&model.Room==0,"journal resumes same room");
-    press(Keys.M);Check(audio.Muted&&!audio.AmbientPlaying,"mute stops ambient");
-    press(Keys.M);Check(!audio.Muted&&audio.AmbientPlaying,"unmute resumes ambient");
+     press(Keys.M);Check(audio.Muted&&audio.MusicGain==0&&audio.AmbientPlaying,"mute silences ambient without stopping it");
+     press(Keys.M);Check(!audio.Muted&&audio.AmbientPlaying&&audio.MusicGain>0,"unmute restores ambient gain");
     press(Keys.Escape);Check(model.State==Stage.Paused&&model.Menu==0,"window pauses");
     press(Keys.S);press(Keys.Enter);Check(model.State==Stage.Help&&model.HelpReturn==Stage.Paused,"pause opens field manual");
     press(Keys.Escape);Check(model.State==Stage.Paused,"field manual returns to pause");
@@ -238,7 +366,7 @@ public static class Tests {
     window.Close();Check(!window.CursorHidden,"window restores system cursor");
    }
 
-    File.WriteAllText("Tests/results.txt","PASS: "+checks+" checks. Procedural pixel rendering, 3 sanctums, distinct epilogue, volume sliders, player fireballs, dash grace, bounded enemies, measured Georgia menus, story gating, boss phases, combo, hazards, flasks, full combat run, per-room dark-fantasy audio, fullscreen-ready native window and custom cursor.\n");
+     File.WriteAllText("Tests/results.txt","PASS: "+checks+" checks. Procedural pixel rendering, 3 sanctums, dark-fantasy ruins, volume sliders, seamless mute-safe PCM crossfades and layered fireballs, dash grace, bounded enemies, measured Georgia menus, abilities manual, four difficulty tiers, story gating, boss phases, combo, hazards, flasks, full combat run, per-room dark-fantasy audio, fullscreen-ready native window and custom cursor.\n");
    return 0;
   }catch(Exception e){
    File.WriteAllText("Tests/results.txt","FAIL after "+checks+" checks: "+e);

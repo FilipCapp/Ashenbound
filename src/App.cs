@@ -2,13 +2,12 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
-using System.Media;
 using System.Windows.Forms;
 namespace Ashenbound {
 public class GameWindow : Form {
  readonly Game game=new Game();readonly Renderer renderer=new Renderer();readonly Timer timer=new Timer();
  readonly Stopwatch watch=Stopwatch.StartNew();readonly Audio audio=new Audio();
-  double previous,accumulator;bool fullscreen,runActive;public bool CursorHidden;Rectangle oldBounds;FormWindowState oldState;
+   double previous,accumulator;bool fullscreen;public bool CursorHidden;Rectangle oldBounds;FormWindowState oldState;
   public GameWindow():this(true){}
   public GameWindow(bool autoFullscreen){
    Text="Ashenbound | The Last Cinder";ClientSize=new Size(1280,720);MinimumSize=new Size(800,480);
@@ -17,13 +16,20 @@ public class GameWindow : Form {
    game.PlaySound=audio.Play;game.RoomEntered=audio.SetRoom;timer.Interval=8;timer.Tick+=TickGame;timer.Start();
    KeyDown+=Down;KeyUp+=Up;MouseMove+=MoveMouse;MouseDown+=MousePressed;MouseUp+=MouseReleased;
    Deactivate+=delegate{if(game.State==Stage.Playing)game.Pause();ClearInput();};
-   FormClosed+=delegate{audio.StopAmbient();timer.Stop();timer.Dispose();renderer.Dispose();audio.Dispose();Cursor.Show();CursorHidden=false;};
+    FormClosed+=delegate{audio.StopMusic();timer.Stop();timer.Dispose();renderer.Dispose();audio.Dispose();Cursor.Show();CursorHidden=false;};
+    SyncMusic();
+   }
+  void ClearInput(){game.Input.Left=game.Input.Right=game.Input.Fire=game.Input.Down=false;game.Input.ClearEdges();}
+  public void SyncMusic(){
+   if(game.State==Stage.Playing)audio.StartAmbient();
+   else if(game.State==Stage.Sunrise||game.State==Stage.Won)audio.StartDawn();
+   else audio.StartMenu();
   }
- void ClearInput(){game.Input.Left=game.Input.Right=game.Input.Fire=game.Input.Down=false;game.Input.ClearEdges();}
- void TickGame(object sender,EventArgs e){
+  void TickGame(object sender,EventArgs e){
   double now=watch.Elapsed.TotalSeconds;accumulator+=Math.Min(.12,now-previous);previous=now;
-  while(accumulator>=1.0/120){game.Step(1f/120);accumulator-=1.0/120;}
-  Invalidate();
+   while(accumulator>=1.0/120){game.Step(1f/120);accumulator-=1.0/120;}
+   SyncMusic();
+   Invalidate();
  }
  protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);renderer.Draw(e.Graphics,game,ClientSize.Width,ClientSize.Height,(float)watch.Elapsed.TotalSeconds);}
   void MoveMouse(object sender,MouseEventArgs e){
@@ -42,33 +48,41 @@ public class GameWindow : Form {
    RectangleF row=MenuLayout.Audio[game.Menu];
    game.SetVolume(game.Menu,(game.Input.Aim.X-(row.X+190))/(row.Width-300));
   }
-  void ToggleSound(){
-   game.ToggleSound();audio.Muted=!game.SoundOn;
-   if(audio.Muted)audio.StopAmbient();
-   else if(runActive)audio.StartAmbient();
-   ClearInput();
-  }
-  void ReturnToTitle(){game.ReturnToTitle();runActive=false;audio.StopAmbient();ClearInput();}
-  void ActivateMenu(int index){
-   Stage state=game.State;
-   if(state==Stage.Title){
-    if(index==0)NewRun();
-    else if(index==1)game.ShowHelp();
-    else if(index==2){game.ShowAudio();ClearInput();}
-    else if(index==3)Application.Exit();
-   } else if(state==Stage.Help){game.CloseHelp();ClearInput();}
-   else if(state==Stage.Audio){if(index>=3){game.CloseAudio();audio.ApplyVolumes(game.Volume);ClearInput();}}
-   else if(state==Stage.Paused){
-    if(index==0)game.Pause();
-    else if(index==1)game.ShowHelp();
-    else if(index==2){game.ShowAudio();ClearInput();}
-    else if(index==3)ReturnToTitle();
-   } else if(state==Stage.Upgrade){game.SelectUpgrade(index);ClearInput();}
-   else if(state==Stage.Dead||state==Stage.Won){
-    if(index==0)NewRun();
-    else if(index==1)ReturnToTitle();
-   }
-  }
+    void ToggleSound(){
+     game.ToggleSound();audio.Muted=!game.SoundOn;
+     SyncMusic();
+     ClearInput();
+    }
+   void ReturnToTitle(){game.ReturnToTitle();ClearInput();SyncMusic();}
+   void StartDifficulty(int index){ClearInput();game.Start(Environment.TickCount,index);SyncMusic();}
+   void ActivateMenu(int index){
+    Stage state=game.State;
+    if(state==Stage.Title){
+     if(index==0)game.ShowDifficulty();
+     else if(index==1)game.ShowHelp();
+     else if(index==2)game.ShowAudio();
+     else if(index==3)game.ShowAbilities();
+     else if(index==4)Application.Exit();
+     ClearInput();
+    } else if(state==Stage.Help){game.CloseHelp();ClearInput();}
+    else if(state==Stage.Audio){if(index>=3){game.CloseAudio();audio.ApplyVolumes(game.Volume);ClearInput();}}
+    else if(state==Stage.Abilities){game.CloseAbilities();ClearInput();}
+    else if(state==Stage.Difficulty){
+     if(index>=0&&index<Campaign.Difficulties.Length)StartDifficulty(index);
+     else if(index==Campaign.Difficulties.Length){game.CloseDifficulty();ClearInput();}
+    }
+    else if(state==Stage.Paused){
+     if(index==0)game.Pause();
+     else if(index==1)game.ShowHelp();
+     else if(index==2){game.ShowAudio();ClearInput();}
+     else if(index==3)ReturnToTitle();
+    } else if(state==Stage.Upgrade){game.SelectUpgrade(index);ClearInput();}
+     else if(state==Stage.Dead||state==Stage.Won){
+      if(index==0)NewRun();
+      else if(index==1)ReturnToTitle();
+     }
+     SyncMusic();
+    }
   void MousePressed(object sender,MouseEventArgs e){
    MoveMouse(sender,e);
    if(e.Button==MouseButtons.Right){game.Input.Dash=true;return;}
@@ -80,43 +94,48 @@ public class GameWindow : Form {
     else if(slider==3)ActivateMenu(3);
     return;
    }
-   if(state==Stage.Story){game.ContinueStory();ClearInput();return;}
-   if(state==Stage.Playing){game.Input.Fire=true;return;}
+    if(state==Stage.Sunrise){game.SkipSunrise();ClearInput();SyncMusic();return;}
+    if(state==Stage.Story){game.ContinueStory();ClearInput();SyncMusic();return;}
+    if(state==Stage.Playing){game.Input.Fire=true;return;}
    int hit=MenuLayout.Hit(state,game.Input.Aim,game.Ending);
    if(hit>=0)ActivateMenu(hit);
   }
   void MouseReleased(object sender,MouseEventArgs e){
-   if(game.AudioDragging){game.AudioDragging=false;audio.ApplyVolumes(game.Volume);ClearInput();return;}
-   if(e.Button==MouseButtons.Left)game.Input.Fire=false;
-  }
-  void NewRun(){ClearInput();game.Start(Environment.TickCount);runActive=true;audio.StartAmbient();}
+    if(game.AudioDragging){game.AudioDragging=false;audio.ApplyVolumes(game.Volume);SyncMusic();ClearInput();return;}
+    if(e.Button==MouseButtons.Left)game.Input.Fire=false;
+   }
+   void NewRun(){ClearInput();game.Start(Environment.TickCount);SyncMusic();}
   void Down(object sender,KeyEventArgs e){
    e.SuppressKeyPress=true;Keys k=e.KeyCode;
    if(k==Keys.F11){ToggleFullscreen();return;}
    if(k==Keys.M){ToggleSound();return;}
-   if(k==Keys.F8){renderer.ReduceMotion=!renderer.ReduceMotion;return;}
-   Stage state=game.State;
-   bool menu=state==Stage.Title||state==Stage.Help||state==Stage.Audio||state==Stage.Upgrade||state==Stage.Paused||state==Stage.Dead||state==Stage.Won;
-   if(menu){
-    if(k==Keys.W||k==Keys.Up){MenuMove(-1);return;}
-    if(k==Keys.S||k==Keys.Down){MenuMove(1);return;}
-    if(state==Stage.Upgrade&&k>=Keys.D1&&k<=Keys.D3){game.SelectUpgrade(k-Keys.D1);ClearInput();return;}
-    if(state==Stage.Audio&&(k==Keys.A||k==Keys.Left||k==Keys.D||k==Keys.Right)){
-     game.AdjustVolume(game.Menu,(k==Keys.D||k==Keys.Right) ? .05f : -.05f);
-     audio.ApplyVolumes(game.Volume);return;
-    }
-    if(k==Keys.Enter){ActivateMenu(game.Menu);return;}
-    if(k==Keys.Escape){
-     if(state==Stage.Help)game.CloseHelp();
-     else if(state==Stage.Audio){game.CloseAudio();audio.ApplyVolumes(game.Volume);}
-     else if(state==Stage.Paused)game.Pause();
-     ClearInput();return;
-    }
+    if(k==Keys.F8){renderer.ReduceMotion=!renderer.ReduceMotion;return;}
+    if(game.State==Stage.Sunrise&&(k==Keys.Enter||k==Keys.Escape)){game.SkipSunrise();ClearInput();SyncMusic();return;}
+    Stage state=game.State;
+    bool menu=state==Stage.Title||state==Stage.Help||state==Stage.Audio||state==Stage.Abilities||state==Stage.Difficulty||state==Stage.Upgrade||state==Stage.Paused||state==Stage.Dead||state==Stage.Won;
+    if(menu){
+     if(k==Keys.W||k==Keys.Up){MenuMove(-1);return;}
+     if(k==Keys.S||k==Keys.Down){MenuMove(1);return;}
+      if(state==Stage.Upgrade&&k>=Keys.D1&&k<=Keys.D3){game.SelectUpgrade(k-Keys.D1);ClearInput();SyncMusic();return;}
+      if(state==Stage.Difficulty&&k>=Keys.D1&&k<=Keys.D4){StartDifficulty(k-Keys.D1);return;}
+      if(state==Stage.Audio&&(k==Keys.A||k==Keys.Left||k==Keys.D||k==Keys.Right)){
+       game.AdjustVolume(game.Menu,(k==Keys.D||k==Keys.Right) ? .05f : -.05f);
+       audio.ApplyVolumes(game.Volume);SyncMusic();return;
+      }
+     if(k==Keys.Enter){ActivateMenu(game.Menu);return;}
+     if(k==Keys.Escape){
+      if(state==Stage.Help)game.CloseHelp();
+      else if(state==Stage.Audio){game.CloseAudio();audio.ApplyVolumes(game.Volume);}
+      else if(state==Stage.Abilities)game.CloseAbilities();
+      else if(state==Stage.Difficulty)game.CloseDifficulty();
+       else if(state==Stage.Paused)game.Pause();
+       ClearInput();SyncMusic();return;
+     }
     return;
    }
-   if(k==Keys.Enter&&state==Stage.Story){game.ContinueStory();ClearInput();return;}
-   if(k==Keys.J&&state==Stage.Playing){game.State=Stage.Story;game.Menu=0;ClearInput();return;}
-   if(k==Keys.Escape){game.Pause();ClearInput();return;}
+    if(k==Keys.Enter&&state==Stage.Story){game.ContinueStory();ClearInput();SyncMusic();return;}
+    if(k==Keys.J&&state==Stage.Playing){game.State=Stage.Story;game.Menu=0;ClearInput();SyncMusic();return;}
+    if(k==Keys.Escape){game.Pause();ClearInput();SyncMusic();return;}
    if(k==Keys.A||k==Keys.Left)game.Input.Left=true;
    if(k==Keys.D||k==Keys.Right)game.Input.Right=true;
    if(k==Keys.S||k==Keys.Down)game.Input.Down=true;
@@ -138,122 +157,40 @@ public class GameWindow : Form {
  }
 }
 public sealed class Audio : IDisposable {
- const int Rate=22050;
- readonly SoundPlayer[] effects=new SoundPlayer[6];readonly MemoryStream[] effectStreams=new MemoryStream[6];
- readonly SoundPlayer[] ambiences=new SoundPlayer[3];readonly MemoryStream[] ambientStreams=new MemoryStream[3];
-  public bool Muted;bool ambient;int room,activeRoom=-1;
-  float master=1,music=.8f,sfx=1;
-  public Audio(){Rebuild();}
-  static double Noise(int i){double x=Math.Sin(i*12.9898)*43758.5453;return (x-Math.Floor(x))*2-1;}
-  static double Loop(double t,double length){double fade=.22;return Math.Max(0,Math.Min(1,Math.Min(t/fade,(length-t)/fade)));}
-  static double Bell(double t,double f){return Math.Exp(-t*4.2)*(Math.Sin(2*Math.PI*f*t)+.42*Math.Sin(2*Math.PI*f*2.01*t)+.18*Math.Sin(2*Math.PI*f*3.02*t));}
-  static double Drum(double t,double f,double decay){return Math.Sin(2*Math.PI*(f-35*Math.Min(1,t*4))*t)*Math.Exp(-t*decay);}
-  static double Chord(double t,double a,double b,double c){return (Math.Sin(2*Math.PI*a*t)+Math.Sin(2*Math.PI*b*t)+Math.Sin(2*Math.PI*c*t)+.3*Math.Sin(2*Math.PI*a*2*t))*.25;}
-  static double Ambient(int r,int i,double gain){
-   double t=(double)i/Rate,v;
-   if(r==0){
-    v=.075*Math.Sin(2*Math.PI*55*t)+.05*Math.Sin(2*Math.PI*82.5*t)+.03*Math.Sin(2*Math.PI*110*t);
-    v+=.06*Bell(t%2,293.66)+.04*Bell((t+1)%2,440);
-    v+=.025*Math.Sin(2*Math.PI*.5*t)*Math.Sin(2*Math.PI*220*t);
-    v+=.012*Noise(i)*Math.Exp(-(t%1)*3);
-   } else if(r==1){
-    v=.07*Math.Sin(2*Math.PI*73.42*t)+.045*Math.Sin(2*Math.PI*110*t+.5*Math.Sin(2*Math.PI*.5*t));
-    double beat=t%1.6;v+=.09*Drum(beat,96,6)*(beat<1?1:0);
-    double bell=t%3.2;v+=.045*Bell(bell,196)+.03*Bell((bell+1.6)%3.2,261.63);
-    v+=.018*Noise(i)*(.5+.5*Math.Sin(2*Math.PI*3.1*t));
-   } else {
-    double chord=t%4,toll=t%5.3;
-    v=.085*Math.Sin(2*Math.PI*49*t)+.05*Math.Sin(2*Math.PI*73.5*t)+.035*Math.Sin(2*Math.PI*98*t);
-    v+=.06*Chord(chord,110,130.81,164.81)+.04*Chord((chord+2)%4,98,123.47,146.83);
-    v+=.05*Bell(toll,146.83)+.03*Bell((toll+2.65)%5.3,155.56);
-    v+=.01*Noise(i);
-   }
-   return v*Loop(t,8)*gain;
-  }
-  static int EffectLength(int n){
-   if(n==0||n==4)return Rate*3/10;
-   if(n==1||n==5)return Rate/2;
-   if(n==2)return Rate*3/2;
-   return Rate*3/5;
-  }
-  static double Effect(int n,int r,int i,double gain){
-   double t=(double)i/Rate,f=r==0?1:r==1?1.12:.88,v;
-   if(n==0){
-    v=.28*Noise(i)*Math.Exp(-t*8)+.22*Math.Sin(2*Math.PI*620*f*(1+.35*t)*t)*Math.Exp(-t*10);
-    v+=.18*Noise(i*7+11)*Math.Exp(-t*18)*(.5+.5*Math.Sin(2*Math.PI*23*t));
-   } else if(n==1){
-    v=.5*Drum(t,130*f,7)+.24*Noise(i)*Math.Exp(-t*20);
-    v+=.18*(Math.Sin(2*Math.PI*310*f*t)+.5*Math.Sin(2*Math.PI*465*f*t))*Math.Exp(-t*9);
-   } else if(n==2){
-    v=.1*Math.Sin(2*Math.PI*146.83*f*t)*Math.Exp(-t*1.6);
-    double[] notes={293.66*f,349.23*f,440*f,587.33*f};
-    for(int k=0;k<notes.Length;k++){
-     double dt=t-k*.18;if(dt<0)continue;
-     v+=.3*Math.Exp(-dt*3.6)*(Math.Sin(2*Math.PI*notes[k]*dt)+.35*Math.Sin(2*Math.PI*notes[k]*2.01*dt));
-    }
-   } else if(n==3){
-    v=.34*Math.Sin(2*Math.PI*(92*f-28*t)*t)*Math.Exp(-t*5);
-    v+=.22*Math.Sin(2*Math.PI*138.6*f*t)*Math.Exp(-t*7)+.16*Noise(i)*Math.Exp(-t*14);
-   } else if(n==4){
-    v=.3*Noise(i)*Math.Exp(-t*11)+.2*Math.Sin(2*Math.PI*(180+620*t)*f*t)*Math.Exp(-t*12);
-   } else {
-    v=.28*Bell(t,880*f)+.18*Math.Sin(2*Math.PI*1320*f*t)*Math.Exp(-t*12)+.14*Noise(i)*Math.Exp(-t*18);
-   }
-   return v*gain;
-  }
-  static byte[] Wave(int count,Func<int,double> sample){
-   MemoryStream ms=new MemoryStream();BinaryWriter w=new BinaryWriter(ms);
-   w.Write(System.Text.Encoding.ASCII.GetBytes("RIFF"));w.Write(36+count*2);
-   w.Write(System.Text.Encoding.ASCII.GetBytes("WAVEfmt "));w.Write(16);w.Write((short)1);w.Write((short)1);
-   w.Write(Rate);w.Write(Rate*2);w.Write((short)2);w.Write((short)16);
-   w.Write(System.Text.Encoding.ASCII.GetBytes("data"));w.Write(count*2);
-   for(int i=0;i<count;i++){
-    double v=sample(i);if(v>1)v=1;if(v<-1)v=-1;
-    w.Write((short)(v*26000));
-   }
-   w.Flush();return ms.ToArray();
-  }
-  void Release(){
-   for(int i=0;i<effects.Length;i++){if(effects[i]!=null){effects[i].Dispose();effects[i]=null;}if(effectStreams[i]!=null){effectStreams[i].Dispose();effectStreams[i]=null;}}
-   for(int i=0;i<ambiences.Length;i++){if(ambiences[i]!=null){ambiences[i].Dispose();ambiences[i]=null;}if(ambientStreams[i]!=null){ambientStreams[i].Dispose();ambientStreams[i]=null;}}
-  }
-  void Rebuild(){
-   bool was=ambient;StopAmbient();Release();
-   try{
-    for(int r=0;r<ambiences.Length;r++){
-     double gain=Muted?0:master*music;
-     MemoryStream ms=new MemoryStream(Wave(Rate*8,delegate(int i){return Ambient(r,i,gain);}));
-     ambientStreams[r]=ms;ambiences[r]=new SoundPlayer(ms);ambiences[r].Load();
-    }
-    for(int n=0;n<effects.Length;n++){
-     double gain=Muted?0:master*sfx;
-     MemoryStream ms=new MemoryStream(Wave(EffectLength(n),delegate(int i){return Effect(n,room,i,gain);}));
-     effectStreams[n]=ms;effects[n]=new SoundPlayer(ms);effects[n].Load();
-    }
-   }catch{Muted=true;}
-   if(was&&!Muted)StartAmbient();
-  }
-  public bool AmbientPlaying{get{return ambient;}}
-  public int Theme{get{return room;}}
-  public float MasterGain{get{return Muted?0:master;}}
-  public float MusicGain{get{return Muted?0:master*music;}}
-  public float SfxGain{get{return Muted?0:master*sfx;}}
-  public void ApplyVolumes(float[] volume){
-   if(volume==null||volume.Length<3)return;
-   float m=Game.Clamp(volume[0],0,1),mus=Game.Clamp(volume[1],0,1),eff=Game.Clamp(volume[2],0,1);
-   if(m==master&&mus==music&&eff==sfx)return;
-   master=m;music=mus;sfx=eff;Rebuild();
-  }
-  public void SetRoom(int index){
-   index=(int)Game.Clamp(index,0,2);
-   if(index==room)return;
-   bool was=ambient;if(was)StopAmbient();room=index;Rebuild();if(was&&!Muted)StartAmbient();
-  }
-  public void Play(int n){if(Muted||n<0||n>=effects.Length||effects[n]==null)return;try{effects[n].Play();}catch{}}
-  public void StartAmbient(){if(Muted||ambient||ambiences[room]==null)return;try{ambiences[room].PlayLooping();ambient=true;activeRoom=room;}catch{}}
-  public void StopAmbient(){if(!ambient)return;if(activeRoom>=0&&activeRoom<ambiences.Length&&ambiences[activeRoom]!=null){try{ambiences[activeRoom].Stop();}catch{}}ambient=false;activeRoom=-1;}
-  public void Dispose(){StopAmbient();Release();}
+ public const int RoomTracks=3,MenuTrack=3,DawnTrack=4,TrackCount=5;
+ readonly PcmMixer mixer;
+ public Audio(){mixer=new PcmMixer();}
+  public bool Available{get{return mixer.Available;}}
+  public bool MixerAvailable{get{return mixer.Available;}}
+  public bool IsRoom(int n){return n>=0&&n<RoomTracks&&mixer.Room==n;}
+  public bool MusicPlaying{get{return mixer.MusicPlaying;}}
+ public bool AmbientPlaying{get{return mixer.MusicPlaying&&mixer.ActiveTrack>=0&&mixer.ActiveTrack<RoomTracks;}}
+ public bool MenuPlaying{get{return mixer.MusicPlaying&&mixer.ActiveTrack==MenuTrack;}}
+ public bool DawnPlaying{get{return mixer.MusicPlaying&&mixer.ActiveTrack==DawnTrack;}}
+ public bool Muted{get{return mixer.Muted;}set{mixer.SetMuted(value);}}
+ public int ActiveTrack{get{return mixer.ActiveTrack;}}
+ public int Theme{get{return mixer.Room;}}
+ public int ActiveVoices{get{return mixer.ActiveVoices;}}
+ public bool CrossfadeActive{get{return mixer.CrossfadeActive;}}
+ public float FadeProgress{get{return mixer.FadeProgress;}}
+ public int Position{get{return mixer.Position;}}
+ public float MasterGain{get{return mixer.MasterGain;}}
+ public float MusicGain{get{return mixer.MusicGain;}}
+ public float SfxGain{get{return mixer.SfxGain;}}
+ public void ApplyVolumes(float[] volume){
+  if(volume==null||volume.Length<3)return;
+  mixer.SetGains(volume[0],volume[1],volume[2]);
  }
+ public void SetRoom(int index){mixer.SetRoom(index);}
+ public void Play(int n){mixer.Play(n);}
+ public void StartTheme(int index){if(index<0||index>=TrackCount)return;mixer.SetMusic(index);}
+ public void StopMusic(){mixer.SetMusic(-1);}
+ public void StartAmbient(){StartTheme(mixer.Room);}
+ public void StartMenu(){StartTheme(MenuTrack);}
+ public void StartDawn(){StartTheme(DawnTrack);}
+ public void StopAmbient(){StopMusic();}
+ public void Dispose(){mixer.Dispose();}
+}
 static class Program {
  [STAThread]
  static int Main(string[] args){

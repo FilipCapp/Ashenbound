@@ -8,22 +8,28 @@ public sealed class Renderer : IDisposable {
   public bool ReduceMotion;
   public string FontName{get{return family.Name;}}
   readonly FontFamily family=CreateFamily("Georgia","Serif");
-  readonly PixelArt pixels=new PixelArt();
-  readonly Bitmap canvas=new Bitmap(320,180);
-  public void Dispose(){family.Dispose();pixels.Dispose();canvas.Dispose();}
-  static FontFamily CreateFamily(params string[] names){
-   for(int i=0;i<names.Length;i++){try{return new FontFamily(names[i]);}catch{}}
-   return new FontFamily(FontFamily.GenericSerif.Name);
-  }
+   readonly PixelArt pixels=new PixelArt();
+   readonly Bitmap canvas=new Bitmap(320,180);
+   readonly StringFormat format=CreateFormat();
+   public void Dispose(){family.Dispose();pixels.Dispose();canvas.Dispose();format.Dispose();}
+   static FontFamily CreateFamily(params string[] names){
+    for(int i=0;i<names.Length;i++){try{return new FontFamily(names[i]);}catch{}}
+    return new FontFamily(FontFamily.GenericSerif.Name);
+   }
+   static StringFormat CreateFormat(){
+    StringFormat result=new StringFormat(StringFormatFlags.NoClip|StringFormatFlags.NoWrap);
+    result.Alignment=StringAlignment.Near;result.LineAlignment=StringAlignment.Near;result.Trimming=StringTrimming.None;
+    return result;
+   }
   void Box(float x,float y,float w,float h,Color c){if(w<=0||h<=0)return;using(var b=new SolidBrush(c))g.FillRectangle(b,x,y,w,h);}
   void Line(float x,float y,float x2,float y2,Color c,float width){using(var p=new Pen(c,width))g.DrawLine(p,x,y,x2,y2);}
-  void Text(string s,float x,float y,float size,Color c){using(var f=new Font(family,size,FontStyle.Regular,GraphicsUnit.Pixel))using(var b=new SolidBrush(c))g.DrawString(s,f,b,x,y,StringFormat.GenericTypographic);}
-  void Bold(string s,float x,float y,float size,Color c){using(var f=new Font(family,size,FontStyle.Bold,GraphicsUnit.Pixel))using(var b=new SolidBrush(c))g.DrawString(s,f,b,x,y,StringFormat.GenericTypographic);}
-  float Measure(string s,float size,bool bold){using(var f=new Font(family,size,bold?FontStyle.Bold:FontStyle.Regular,GraphicsUnit.Pixel))return g.MeasureString(s,f,new SizeF(10000,10000),StringFormat.GenericTypographic).Width;}
+  void Text(string s,float x,float y,float size,Color c){using(var f=new Font(family,size,FontStyle.Regular,GraphicsUnit.Pixel))using(var b=new SolidBrush(c))g.DrawString(s,f,b,x,y,format);}
+  void Bold(string s,float x,float y,float size,Color c){using(var f=new Font(family,size,FontStyle.Bold,GraphicsUnit.Pixel))using(var b=new SolidBrush(c))g.DrawString(s,f,b,x,y,format);}
+  float Measure(string s,float size,bool bold){using(var f=new Font(family,size,bold?FontStyle.Bold:FontStyle.Regular,GraphicsUnit.Pixel))return g.MeasureString(s,f,new SizeF(10000,10000),format).Width;}
   public float TextWidth(string s,float size,bool bold){
    using(Bitmap b=new Bitmap(1,1))using(Graphics mg=Graphics.FromImage(b))
    using(Font f=new Font(family,size,bold?FontStyle.Bold:FontStyle.Regular,GraphicsUnit.Pixel))
-   return mg.MeasureString(s,f,new SizeF(10000,10000),StringFormat.GenericTypographic).Width;
+   return mg.MeasureString(s,f,new SizeF(10000,10000),format).Width;
   }
   void TextRight(string s,float right,float y,float size,Color c){Text(s,right-Measure(s,size,false),y,size,c);}
   void TextWrap(string s,float x,float y,float maxWidth,float size,float lineHeight,Color c){
@@ -34,11 +40,11 @@ public sealed class Renderer : IDisposable {
      string[] words=paragraphs[p].Split(' ');string line="";
      for(int n=0;n<words.Length;n++){
       string candidate=line.Length==0?words[n]:line+" "+words[n];
-      if(g.MeasureString(candidate,f,new SizeF(10000,10000),StringFormat.GenericTypographic).Width>maxWidth&&line.Length>0){
-       g.DrawString(line,f,b,x,cy,StringFormat.GenericTypographic);cy+=lineHeight;line=words[n];
+      if(g.MeasureString(candidate,f,new SizeF(10000,10000),format).Width>maxWidth&&line.Length>0){
+       g.DrawString(line,f,b,x,cy,format);cy+=lineHeight;line=words[n];
       } else line=candidate;
      }
-     if(line.Length>0){g.DrawString(line,f,b,x,cy,StringFormat.GenericTypographic);cy+=lineHeight;}
+     if(line.Length>0){g.DrawString(line,f,b,x,cy,format);cy+=lineHeight;}
     }
    }
   }
@@ -48,8 +54,8 @@ public sealed class Renderer : IDisposable {
   game=model;clock=seconds;graphics.Clear(Color.Black);
   using(Graphics low=Graphics.FromImage(canvas)){
    g=low;g.Clear(Palette.Ink);g.ScaleTransform(.25f,.25f);g.SmoothingMode=SmoothingMode.None;
-   pixels.Background(g,game.Room,clock,ReduceMotion);
-   if(game.State!=Stage.Title){
+    pixels.Background(g,game.Room,clock,ReduceMotion);
+    if(game.State!=Stage.Title&&game.State!=Stage.Sunrise){
     var saved=g.Save();
     if(!ReduceMotion)g.TranslateTransform((int)(Math.Sin(clock*110)*game.Shake/4)*4,(int)(Math.Cos(clock*130)*game.Shake/8)*4);
     World();g.Restore(saved);
@@ -63,16 +69,19 @@ public sealed class Renderer : IDisposable {
   g.InterpolationMode=InterpolationMode.NearestNeighbor;
   g.PixelOffsetMode=PixelOffsetMode.Half;
   g.DrawImage(canvas,new Rectangle(0,0,(int)Game.Width,(int)Game.Height));
-  g.TextRenderingHint=TextRenderingHint.SingleBitPerPixelGridFit;
-  g.SmoothingMode=SmoothingMode.None;
-  if(game.State==Stage.Title){Title();CursorMark();return;}
-  Hud();
-  if(game.State==Stage.Story)StoryPage();
+   g.TextRenderingHint=TextRenderingHint.AntiAliasGridFit;
+   g.SmoothingMode=SmoothingMode.AntiAlias;
+   if(game.State==Stage.Title){Title();CursorMark();return;}
+   if(game.State==Stage.Sunrise){Sunrise();CursorMark();return;}
+   Hud();
+   if(game.State==Stage.Story)StoryPage();
   else if(game.State==Stage.Upgrade)Upgrades();
   else if(game.State==Stage.Paused)Pause();
-   else if(game.State==Stage.Help)Help();
-   else if(game.State==Stage.Audio)AudioSettings();
-   else if(game.State==Stage.Won||game.State==Stage.Dead)End();
+    else if(game.State==Stage.Help)Help();
+    else if(game.State==Stage.Audio)AudioSettings();
+    else if(game.State==Stage.Abilities)Abilities();
+    else if(game.State==Stage.Difficulty)Difficulty();
+    else if(game.State==Stage.Won||game.State==Stage.Dead)End();
   CursorMark();
  }
  void World(){
@@ -135,14 +144,35 @@ public sealed class Renderer : IDisposable {
   if(e.Hit>0)Box(e.P.X-8,e.P.Y-12,16,8,Color.White);
   if(e.Kind!=2){Box(e.P.X-22,e.P.Y-44,44,4,Color.FromArgb(66,36,48));Box(e.P.X-22,e.P.Y-44,44*Math.Max(0,e.Hp/e.MaxHp),4,c);}
  }
-  void Ring(float x,float y,float r,Color c,float width){using(Pen p=new Pen(c,width))g.DrawEllipse(p,x-r,y-r,r*2,r*2);}
-  void Frame(float x,float y,float w,float h,Color edge){
-   Box(x,y,w,h,Color.FromArgb(238,8,8,16));
-   Box(x,y,w,2,edge);Box(x,y+h-2,w,2,Color.FromArgb(90,edge.R,edge.G,edge.B));
-   Box(x,y,2,h,edge);Box(x+w-2,y,2,h,Color.FromArgb(90,edge.R,edge.G,edge.B));
-   Box(x,y,20,2,Palette.Gold);Box(x,y,2,20,Palette.Gold);
-   Box(x+w-20,y+h-2,20,2,Palette.Gold);Box(x+w-2,y+h-20,2,20,Palette.Gold);
-  }
+   void Ring(float x,float y,float r,Color c,float width){using(Pen p=new Pen(c,width))g.DrawEllipse(p,x-r,y-r,r*2,r*2);}
+   void Grain(float x,float y,float w,float h,int count,int seed){
+    int spanX=Math.Max(1,(int)w),spanY=Math.Max(1,(int)h);
+    for(int i=0;i<count;i++){
+     float px=x+(i*73+seed*37)%spanX;
+     float py=y+(i*41+seed*19)%spanY;
+     Color c=i%4==0?Color.FromArgb(26,255,205,116):Color.FromArgb(18,228,222,208);
+     Box(px,py,i%7==0?2:1,1,c);
+    }
+   }
+   void Panel(RectangleF r,bool active,int seed){
+    Box(r.X,r.Y,r.Width,r.Height,Color.FromArgb(active?52:20,9,9,18));
+    Box(r.X+3,r.Y+3,r.Width-6,r.Height-6,Color.FromArgb(active?38:16,20,20,32));
+    Box(r.X,r.Y,r.Width,2,active?Palette.Gold:Color.FromArgb(92,255,139,74));
+    Box(r.X,r.Y+r.Height-2,r.Width,2,Color.FromArgb(active?130:70,255,139,74));
+    Box(r.X,r.Y,2,r.Height,Color.FromArgb(active?150:80,255,205,116));
+    Box(r.X+r.Width-2,r.Y,2,r.Height,Color.FromArgb(active?110:60,255,139,74));
+    Grain(r.X+6,r.Y+6,r.Width-12,r.Height-12,18,seed);
+   }
+   void Frame(float x,float y,float w,float h,Color edge){
+    Box(x,y,w,h,Color.FromArgb(238,8,8,16));
+    Box(x,y,w,2,edge);Box(x,y+h-2,w,2,Color.FromArgb(90,edge.R,edge.G,edge.B));
+    Box(x,y,2,h,edge);Box(x+w-2,y,2,h,Color.FromArgb(90,edge.R,edge.G,edge.B));
+    Box(x,y,20,2,Palette.Gold);Box(x,y,2,20,Palette.Gold);
+    Box(x+w-20,y+h-2,20,2,Palette.Gold);Box(x+w-2,y+h-20,2,20,Palette.Gold);
+    Box(x+7,y+7,w-14,1,Color.FromArgb(28,255,205,116));
+    Box(x+7,y+h-8,w-14,1,Color.FromArgb(24,255,139,74));
+    Grain(x+9,y+9,w-18,h-18,42,(int)x+(int)y);
+   }
   void Sparks(float x,float y,float w,float h){
    if(ReduceMotion)return;
    for(int i=0;i<16;i++){
@@ -166,33 +196,38 @@ public sealed class Renderer : IDisposable {
    Text(sub,x,y+78,18,Color.FromArgb(198,204,208));
    Box(x,y+108,560,2,Color.FromArgb(90,255,139,74));
   }
-   void MenuItem(string label,string hint,RectangleF r,int index){
-    bool hover=r.Contains(game.Input.Aim.X,game.Input.Aim.Y);
-    bool active=hover||game.Menu==index;
-    Box(r.X,r.Y,r.Width,r.Height,Color.FromArgb(active?62:24,18,18,30));
-    Box(r.X,r.Y,r.Width,2,active?Palette.Gold:Color.FromArgb(90,255,139,74));
-    Box(r.X,r.Y,5,r.Height,active?Palette.Gold:Palette.Ember);
-    string shown=(active?"> ":"  ")+label;float labelX=r.X+22;
-    Bold(shown,labelX,r.Y+16,20,active?Color.White:Palette.Ash);
-    if(hint.Length>0){
-     float hintWidth=Measure(hint,14,false);float hintX=r.Right-18-hintWidth;
-     if(hintX>=labelX+Measure(shown,20,true)+12)Text(hint,hintX,r.Y+20,14,active?Palette.Gold:Palette.Muted);
+    void MenuItem(string label,string hint,RectangleF r,int index){
+     bool hover=r.Contains(game.Input.Aim.X,game.Input.Aim.Y);
+     bool active=hover||game.Menu==index;
+     Panel(r,active,index+3);
+     Box(r.X+8,r.Y+8,10,r.Height-16,active?Palette.Gold:Color.FromArgb(90,255,139,74));
+     Box(r.X+11,r.Y+r.Height/2-5,4,4,active?Color.White:Palette.Ember);
+     Box(r.X+24,r.Bottom-9,r.Width-48,1,Color.FromArgb(active?90:40,255,139,74));
+     string shown=(active?"> ":"  ")+label;float labelX=r.X+32;
+     Bold(shown,labelX,r.Y+12,21,active?Color.White:Palette.Ash);
+     if(hint.Length>0){
+      float hintWidth=Measure(hint,14,false);float hintX=r.Right-18-hintWidth;
+      if(hintX>=labelX+Measure(shown,21,true)+12)Text(hint,hintX,r.Y+16,14,active?Palette.Gold:Palette.Muted);
+     }
     }
-   }
-   void MenuCard(string key,string title,string detail,RectangleF r,int index){
-    bool hover=r.Contains(game.Input.Aim.X,game.Input.Aim.Y);
-    bool active=hover||game.Menu==index;
-    Box(r.X,r.Y,r.Width,r.Height,Color.FromArgb(active?68:26,18,18,30));
-    Box(r.X,r.Y,r.Width,2,active?Palette.Gold:Color.FromArgb(80,112,214,205));
-    Box(r.X,r.Y,6,r.Height,active?Palette.Gold:Palette.Ember);
-    Bold(key,r.X+24,r.Y+29,32,active?Palette.Gold:Palette.Muted);
-    Bold(title,r.X+86,r.Y+19,24,active?Color.White:Palette.Ash);
-    Text(detail,r.X+86,r.Y+58,16,active?Color.FromArgb(220,255,205,116):Palette.Muted);
-    if(active){
-     float badgeWidth=Measure("SELECTED",14,false);float badgeX=r.Right-18-badgeWidth;
-     if(badgeX>=r.X+86+Measure(detail,16,false)+12)Text("SELECTED",badgeX,r.Y+64,14,Palette.Gold);
+    void MenuCard(string key,string title,string detail,RectangleF r,int index){
+     bool hover=r.Contains(game.Input.Aim.X,game.Input.Aim.Y);
+     bool active=hover||game.Menu==index;
+     bool compact=r.Height<72;
+     Panel(r,active,index+13);
+     Box(r.X+8,r.Y+8,8,r.Height-16,active?Palette.Gold:Palette.Ember);
+     Box(r.X+72,r.Y+10,1,r.Height-20,Color.FromArgb(50,255,205,116));
+     float keySize=compact?25:32,titleSize=compact?21:24,detailSize=compact?13:16;
+     float keyY=compact?r.Y+13:r.Y+29,titleY=compact?r.Y+13:r.Y+19,detailY=compact?r.Y+37:r.Y+58;
+     Bold(key,r.X+24,keyY,keySize,active?Palette.Gold:Palette.Muted);
+     Bold(title,r.X+86,titleY,titleSize,active?Color.White:Palette.Ash);
+     Text(detail,r.X+86,detailY,detailSize,active?Color.FromArgb(220,255,205,116):Palette.Muted);
+     if(active){
+      float badgeWidth=Measure("SELECTED",14,false);float badgeX=r.Right-18-badgeWidth;
+      float badgeY=compact?r.Y+39:r.Y+64;
+      if(badgeX>=r.X+86+Measure(detail,detailSize,false)+12)Text("SELECTED",badgeX,badgeY,14,Palette.Gold);
+     }
     }
-   }
    void ContextFooter(string message){Box(0,670,Game.Width,50,Palette.Ink);Text(message,28,678,14,Palette.Muted);}
    void Footer(){
     Box(0,670,Game.Width,50,Palette.Ink);
@@ -213,13 +248,14 @@ public sealed class Renderer : IDisposable {
    Actor(new V(360,548),new V(1,0),3,0);
    Box(58,600,600,3,Palette.Ember);
    Text("VEYRA / EMBER BEARER",88,612,16,Palette.Muted);
-   Frame(700,160,510,380,Palette.Gold);
-   Text("MENU",740,190,16,Palette.Gold);
-   RectangleF[] items=MenuLayout.Title;
-   MenuItem("NEW VIGIL","ENTER",items[0],0);
-   MenuItem("FIELD MANUAL","",items[1],1);
-    MenuItem("AUDIO SETTINGS","",items[2],2);
-    MenuItem("RETURN TO DESKTOP","",items[3],3);
+    Frame(700,160,510,470,Palette.Gold);
+    Text("MENU",740,190,16,Palette.Gold);
+    RectangleF[] items=MenuLayout.Title;
+    MenuItem("NEW VIGIL","ENTER",items[0],0);
+    MenuItem("FIELD MANUAL","",items[1],1);
+     MenuItem("AUDIO SETTINGS","",items[2],2);
+     MenuItem("ABILITIES MANUAL","",items[3],3);
+     MenuItem("RETURN TO DESKTOP","",items[4],4);
     ContextFooter("W/S SELECT   ENTER CONFIRM   M MUTE   F11 FULLSCREEN   F8 MOTION");
   }
   void Hud(){
@@ -276,14 +312,110 @@ public sealed class Renderer : IDisposable {
     MenuItem("WITNESS THE DAWN","ENTER",MenuLayout.Epilogue[0],0);
     ContextFooter("ENTER / CLICK TO SEE THE VICTORY RECORD");
    }
+  static UpgradeDef UpgradeFor(RelicKind kind){
+   for(int i=0;i<Campaign.Upgrades.Length;i++)if(Campaign.Upgrades[i].Kind==kind)return Campaign.Upgrades[i];
+   return Campaign.Upgrades[0];
+  }
   void Upgrades(){
    Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
    Frame(220,132,840,500,Palette.Ember);
    Header("SANCTUM CLEAR","A BREATH BETWEEN BELLS","Choose one relic. The next sanctum is waiting.",266,152);
-   MenuCard("1","CINDER EDGE","+15% DAMAGE",MenuLayout.Upgrade[0],0);
-   MenuCard("2","ASHEN HEART","+30 MAX HP / HEAL 55",MenuLayout.Upgrade[1],1);
-   MenuCard("3","SWIFT PILGRIM","FASTER FIRE AND MOVEMENT",MenuLayout.Upgrade[2],2);
+   for(int i=0;i<game.UpgradeChoices.Length;i++){
+    UpgradeDef def=UpgradeFor(game.UpgradeChoices[i]);
+    MenuCard((i+1).ToString(),def.Name,def.Detail,MenuLayout.Upgrade[i],i);
+   }
    ContextFooter("1/2/3 OR W/S + ENTER   SELECT A RELIC");
+  }
+   void Triangle(float x1,float y1,float x2,float y2,float x3,float y3,Color c){
+    using(SolidBrush b=new SolidBrush(c))g.FillPolygon(b,new PointF[]{new PointF(x1,y1),new PointF(x2,y2),new PointF(x3,y3)});
+   }
+   void GothicArch(float cx,float baseY,float w,float h,Color fill,Color edge){
+    float left=cx-w/2,right=cx+w/2,top=baseY-h;
+    Triangle(cx,top-38,left,top+34,right,top+34,fill);
+    Box(left,top+34,w,h-34,fill);
+    Color opening=Color.FromArgb(255,34,20,32);
+    Triangle(cx,top-14,left+26,top+48,right-26,top+48,opening);
+    Box(left+26,top+48,w-52,h-48,opening);
+    Line(left,baseY,left,top+34,edge,2);
+    Line(right,baseY,right,top+34,edge,2);
+    Line(left,top+34,cx,top-38,edge,2);
+    Line(cx,top-38,right,top+34,edge,2);
+    Line(left+26,baseY,left+26,top+48,Color.FromArgb(60,255,139,74),2);
+    Line(right-26,baseY,right-26,top+48,Color.FromArgb(60,255,139,74),2);
+   }
+   void Ruins(float horizon){
+    Color far=Color.FromArgb(255,28,18,34),dark=Color.FromArgb(255,9,8,15),edge=Color.FromArgb(90,255,139,74);
+    for(int i=0;i<9;i++){
+     float x=i*162-60,peak=horizon-70-((i*37)%66);
+     Triangle(x,horizon+8,x+80,peak,x+170,horizon+8,far);
+    }
+    for(int i=0;i<7;i++){
+     float x=i*205-80,h=58+((i*61)%82);
+     Box(x,horizon-h,116,h+10,dark);
+     Triangle(x,horizon-h,x+58,horizon-h-22-((i*17)%30),x+116,horizon-h,dark);
+     Box(x+18,horizon-h+8,12,18,Color.FromArgb(180,92,28,36));
+     Box(x+74,horizon-h+14,10,12,Color.FromArgb(150,92,28,36));
+     Line(x,horizon-h,x,horizon,edge,1);
+    }
+    GothicArch(704,horizon,244,206,dark,edge);
+    GothicArch(1042,horizon,150,142,dark,Color.FromArgb(60,255,139,74));
+    for(int i=0;i<5;i++){
+     float x=180+i*84,h=104+((i*29)%70);
+     Box(x,horizon-h,18,h,dark);
+     Box(x-8,horizon-h,34,10,dark);
+     Box(x-6,horizon-8,30,8,dark);
+     Line(x+9,horizon-h,x+9,horizon,edge,1);
+    }
+    Box(0,horizon-6,Game.Width,10,Color.FromArgb(255,24,12,20));
+    for(int i=0;i<10;i++){
+     float x=(i*151+83)%1280,y=horizon-24-((i*43)%80);
+     Box(x,y,3,12,Color.FromArgb(180,255,139,74));
+    }
+   }
+   void Sunrise(){
+    float progress=ReduceMotion?1:Game.Clamp(game.SunriseTime/Game.SunriseDuration,0,1);
+    using(LinearGradientBrush sky=new LinearGradientBrush(new Rectangle(0,0,(int)Game.Width,(int)Game.Height),Color.FromArgb(255,7,7,17),Color.FromArgb(255,104,20,36),LinearGradientMode.Vertical))
+     g.FillRectangle(sky,0,0,Game.Width,Game.Height);
+    float horizon=548-progress*96;
+    float sunY=520-progress*310;
+    float sunX=826;
+    int glow=(int)(40+progress*52);
+    Circle(sunX,sunY,glow*3,Color.FromArgb((int)(8+progress*10),190,32,44));
+    Circle(sunX,sunY,glow*2,Color.FromArgb((int)(16+progress*16),206,44,52));
+    Circle(sunX,sunY,glow,Color.FromArgb((int)(130+progress*90),154,24,36));
+    Circle(sunX,sunY,Math.Max(6,glow/2),Color.FromArgb(255,12,7,14));
+    Ring(sunX,sunY,glow+4,Color.FromArgb((int)(70+progress*90),255,92,72),3);
+    if(!ReduceMotion){
+     for(int i=0;i<14;i++){
+      float a=i*.4488f;
+      float length=210+((i*47)%170)*progress;
+      Line(sunX,sunY,sunX+(float)Math.Cos(a)*length,sunY+(float)Math.Sin(a)*length,Color.FromArgb((int)(12+progress*18),255,92,72),2);
+     }
+    }
+    Box(0,horizon,Game.Width,Game.Height-horizon,Color.FromArgb(255,12,8,17));
+    Ruins(horizon);
+    if(!ReduceMotion){
+     for(int i=0;i<28;i++){
+      float t=(clock*.28f+i*.179f)%1f;
+      float px=(i*97+(int)(clock*18))%1280;
+      float py=horizon-180+t*260;
+      Box(px,py,2,5,Color.FromArgb((int)(120*(1-t)),255,139,74));
+     }
+    }
+   Text("THE LONG DUSK BREAKS",58,58,16,Palette.Ember);
+   Bold("ONE MORE MORNING",54,88,50,Color.White);
+   Box(58,158,520,2,Color.FromArgb(120,255,205,116));
+   TextWrap("First a red line, then a river. The Cinder leaves Veyra's hands, and the world remembers the sun.",60,178,590,17,24,Color.FromArgb(230,235,226,214));
+   string phase=progress<.34f?"I  THE RED LINE":progress<.72f?"II  THE RIVER":"III  THE MORNING";
+   Bold(phase,60,276,24,Palette.Gold);
+   if(!ReduceMotion){
+    float line=600-progress*480;
+    Box(line,horizon-2,1280-line,3,Color.FromArgb((int)(90+progress*120),255,205,116));
+   }
+   Box(440,628,400,6,Color.FromArgb(44,228,222,208));
+   Box(440,628,400*progress,6,Palette.Gold);
+   Text("WITNESSING THE DAWN",440,602,14,Palette.Muted);
+   TextRight("ENTER / ESC / CLICK TO SKIP",840,602,14,Palette.Ash);
   }
   void Pause(){
    Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
@@ -317,28 +449,57 @@ public sealed class Renderer : IDisposable {
    MenuItem("BACK","ESC",MenuLayout.Help[0],0);
    ContextFooter("ESC / ENTER TO RETURN");
   }
-   void Slider(string label,float value,RectangleF r,int index){
-    bool active=game.Menu==index||r.Contains(game.Input.Aim.X,game.Input.Aim.Y);
-    Box(r.X,r.Y,r.Width,r.Height,Color.FromArgb(active?62:24,18,18,30));
-    Box(r.X,r.Y,r.Width,2,active?Palette.Gold:Color.FromArgb(90,255,139,74));
-    Box(r.X,r.Y,5,r.Height,active?Palette.Gold:Palette.Ember);
-    Bold(label,r.X+22,r.Y+16,20,active?Color.White:Palette.Ash);
-    float barX=r.X+190,barY=r.Y+24,barW=r.Width-300;
-    Box(barX,barY,barW,10,Color.FromArgb(70,34,45));
-    Box(barX,barY,barW*value,10,active?Palette.Gold:Palette.Ember);
-    for(int i=0;i<=10;i++)Box(barX+barW*i/10-1,barY-3,2,16,Color.FromArgb(70,12,12,18));
-    TextRight(Math.Round(value*100)+"%",r.Right-24,r.Y+20,17,active?Palette.Gold:Palette.Muted);
-   }
-   void AudioSettings(){
-    Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
-    Frame(250,130,780,470,Palette.Gold);
-    Header("AUDIO RITES","TUNE THE ASH","Master, music, and effects.",296,148);
-    Slider("MASTER",game.Volume[Game.MasterVolumeIndex],MenuLayout.Audio[0],0);
-    Slider("MUSIC",game.Volume[Game.MusicVolumeIndex],MenuLayout.Audio[1],1);
-    Slider("EFFECTS",game.Volume[Game.SfxVolumeIndex],MenuLayout.Audio[2],2);
-    MenuItem("BACK","ESC",MenuLayout.Audio[3],3);
-    ContextFooter("A/D ADJUST   W/S SELECT   ENTER / ESC BACK   M MUTE");
-   }
+    void Slider(string label,float value,RectangleF r,int index){
+     bool active=game.Menu==index||r.Contains(game.Input.Aim.X,game.Input.Aim.Y);
+     Panel(r,active,60+index);
+     Box(r.X+8,r.Y+8,8,r.Height-16,active?Palette.Gold:Palette.Ember);
+     Bold(label,r.X+28,r.Y+14,21,active?Color.White:Palette.Ash);
+     float barX=r.X+190,barY=r.Y+24,barW=r.Width-300;
+     Box(barX-2,barY-2,barW+4,14,Color.FromArgb(active?70:40,255,205,116));
+     Box(barX,barY,barW,10,Color.FromArgb(70,34,45));
+     Box(barX,barY,barW*value,10,active?Palette.Gold:Palette.Ember);
+     Box(barX,barY,barW*value,2,Color.FromArgb(active?180:110,255,205,116));
+     for(int i=0;i<=10;i++)Box(barX+barW*i/10-1,barY-3,2,16,Color.FromArgb(70,12,12,18));
+     TextRight(Math.Round(value*100)+"%",r.Right-24,r.Y+18,17,active?Palette.Gold:Palette.Muted);
+    }
+    void AudioSettings(){
+     Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
+     Frame(250,130,780,470,Palette.Gold);
+     Header("AUDIO RITES","TUNE THE ASH","Master, music, and effects.",296,148);
+     Slider("MASTER",game.Volume[Game.MasterVolumeIndex],MenuLayout.Audio[0],0);
+     Slider("MUSIC",game.Volume[Game.MusicVolumeIndex],MenuLayout.Audio[1],1);
+     Slider("EFFECTS",game.Volume[Game.SfxVolumeIndex],MenuLayout.Audio[2],2);
+     MenuItem("BACK","ESC",MenuLayout.Audio[3],3);
+     ContextFooter("A/D ADJUST   W/S SELECT   ENTER / ESC BACK   M MUTE");
+    }
+    void Abilities(){
+     Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
+     Frame(180,104,920,560,Palette.Gold);
+     Header("CINDER LEDGER","ABILITIES MANUAL","Nine relics can change the shape of a vigil.",226,126);
+     for(int i=0;i<Campaign.Upgrades.Length;i++){
+      float x=226+(i%3)*290,y=246+(i/3)*114;
+      RectangleF card=new RectangleF(x,y,270,98);
+       bool active=card.Contains(game.Input.Aim.X,game.Input.Aim.Y);
+       Panel(card,active,40+i);
+       Box(card.X+54,card.Y+10,1,card.Height-20,Color.FromArgb(50,255,205,116));
+       Bold((i+1).ToString("00"),card.X+16,card.Y+20,17,active?Palette.Gold:Palette.Muted);
+       Bold(Campaign.Upgrades[i].Name,card.X+68,card.Y+16,17,active?Color.White:Palette.Ash);
+       Text(Campaign.Upgrades[i].Detail,card.X+18,card.Y+56,14,active?Palette.Gold:Palette.Muted);
+     }
+     MenuItem("BACK","ESC",MenuLayout.Abilities[0],0);
+     ContextFooter("ESC / ENTER TO RETURN");
+    }
+    void Difficulty(){
+     Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
+     Frame(250,110,780,510,Palette.Gold);
+     Header("NEW VIGIL","DIFFICULTY","Foe strength and incoming damage change. Rooms and relics do not.",296,130);
+     for(int i=0;i<Campaign.Difficulties.Length;i++){
+      DifficultyDef d=Campaign.Difficulties[i];
+      MenuCard((i+1).ToString(),d.Name,d.Detail,MenuLayout.Difficulty[i],i);
+     }
+     MenuItem("BACK","ESC",MenuLayout.Difficulty[4],4);
+     ContextFooter("W/S SELECT   ENTER / NUMBER 1-4 CONFIRM   ESC BACK");
+    }
    void End(){
     bool won=game.State==Stage.Won;
    Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
