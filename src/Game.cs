@@ -15,8 +15,10 @@ public class Hazard {
  public RectangleF Bounds;public int Kind;public float Timer;public bool Active;public float Life;
 }
 public class Game {
- public const float Floor=620,Width=1280,Height=720;
- public Stage State=Stage.Title;
+ public const float Floor=620,Width=1280,Height=720,EnemyMargin=44f;
+ public Stage State=Stage.Title,HelpReturn=Stage.Title;
+ public int Menu;
+ public bool SoundOn=true;
  public readonly Controls Input=new Controls();
  public V Player,Velocity,Aim=new V(1,0);
  public bool Grounded,ExitOpen,Ending;
@@ -34,11 +36,11 @@ public class Game {
  Rng random=new Rng(1);float spawn;public Action<int> PlaySound;
  public bool Overcharged{get{return Chain>=8;}}
  public void Start(int seed){
-  Seed=seed;random=new Rng(seed);Room=Score=Kills=Chain=BestChain=UpgradeCount=0;
+  Seed=seed;Menu=0;HelpReturn=Stage.Title;random=new Rng(seed);Room=Score=Kills=Chain=BestChain=UpgradeCount=0;
   Health=MaxHealth=100;Damage=26;FireRate=.15f;Speed=315;Flasks=3;Elapsed=0;Ending=false;
   EnterRoom();State=Stage.Story;
  }
- public void ContinueStory(){if(State!=Stage.Story)return;State=Ending?Stage.Won:Stage.Playing;Input.Fire=false;Input.ClearEdges();}
+ public void ContinueStory(){if(State!=Stage.Story)return;State=Ending?Stage.Won:Stage.Playing;Menu=0;Input.Fire=false;Input.ClearEdges();}
  public void EnterRoom(){
   Platforms.Clear();Enemies.Clear();Bullets.Clear();Particles.Clear();Hazards.Clear();
   Player=new V(95,Floor-24);Velocity=new V();Aim=new V(1,0);Grounded=true;
@@ -73,13 +75,18 @@ public class Game {
   float hp=kind==3?1100:kind==0?58:kind==1?44:72;
   Enemies.Add(new Enemy{P=p,Kind=kind,Hp=hp,MaxHp=hp,Fire=kind==3?1.2f:.8f+(float)random.NextDouble()});
  }
- public void Pause(){if(State==Stage.Playing)State=Stage.Paused;else if(State==Stage.Paused)State=Stage.Playing;}
+ public void Pause(){if(State==Stage.Playing){State=Stage.Paused;Menu=0;}else if(State==Stage.Paused){State=Stage.Playing;Menu=0;}}
+ public void MoveMenu(int delta,int count){if(count>0)Menu=((Menu+delta)%count+count)%count;}
+ public void ShowHelp(){if(State==Stage.Help)return;HelpReturn=State;State=Stage.Help;Menu=0;Input.Fire=false;Input.ClearEdges();}
+ public void CloseHelp(){State=HelpReturn==Stage.Help?Stage.Title:HelpReturn;Menu=0;Input.Fire=false;Input.ClearEdges();}
+ public void ToggleSound(){SoundOn=!SoundOn;}
+ public void ReturnToTitle(){State=Stage.Title;Menu=0;Input.Fire=false;Input.ClearEdges();}
  public void SelectUpgrade(int n){
   if(State!=Stage.Upgrade||n<0||n>2)return;
   if(n==0)Damage*=1.15f;
   else if(n==1){MaxHealth+=30;Health=Math.Min(MaxHealth,Health+55);}
   else{FireRate=Math.Max(.07f,FireRate*.9f);Speed=Math.Min(405,Speed+12);}
-  UpgradeCount++;Room++;EnterRoom();State=Stage.Story;Sound(2);
+  UpgradeCount++;Room++;EnterRoom();State=Stage.Story;Menu=0;Sound(2);
  }
  public void Hurt(float amount){
   if(State!=Stage.Playing||Invulnerable>0)return;
@@ -171,20 +178,22 @@ public class Game {
       e.Fire=.58f;Shake=Math.Max(Shake,5);
       AddHazard(300+(float)random.NextDouble()*600,0,1.4f);
       Fan(e.P,dir,5,.19f,315,16);
-     } else if(phase<.67f){
-      e.Fire=.92f;e.Mode=(e.Mode+1)%2;
-      if(e.Mode==0)Fan(e.P,dir,5,.16f,300,15);
-      else{Fan(e.P,new V(dir.X,0),2,.06f,520,17);Fan(e.P+new V(0,28),dir,3,.12f,420,15);}
-     } else {
-      e.Fire=1.25f;Fan(e.P,dir,3,.17f,255,14);
+      } else if(phase<.67f){
+       e.Fire=.92f;e.Mode=(e.Mode+1)%2;
+       if(e.Mode==0)Fan(e.P,dir,5,.16f,300,15);
+       else{Fan(e.P,new V(dir.X,0),2,.06f,520,17);Fan(e.P+new V(0,28),dir,3,.12f,420,15);}
+      } else {
+       e.Fire=1.25f;Fan(e.P,dir,3,.17f,255,14);
+      }
      }
     }
-   }
-   if(e.Kind<3&&e.Fire<=0&&e.Kind==2){
-    e.Fire=2.1f;
-    Bullets.Add(new Bullet{P=e.P,Velocity=dir*260,Life=5,Hostile=true,Damage=12,Kind=0});
-   }
-   if((Player-e.P).Length<(e.Kind==3?66:34))Hurt(e.Kind==3?22:e.Kind==2?12:11);
+    e.P.X=Clamp(e.P.X,EnemyMargin,Width-EnemyMargin);
+    if(e.Kind<3)e.P.Y=Clamp(e.P.Y,170,Floor-24);
+    if(e.Kind<3&&e.Fire<=0&&e.Kind==2){
+     e.Fire=2.1f;
+     Bullets.Add(new Bullet{P=e.P,Velocity=dir*260,Life=5,Hostile=true,Damage=12,Kind=0});
+    }
+    if((Player-e.P).Length<(e.Kind==3?66:34))Hurt(e.Kind==3?22:e.Kind==2?12:11);
   }
  }
  void Fan(V origin,V dir,int count,float spread,float speed,float damage){

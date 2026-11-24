@@ -24,46 +24,77 @@ public class GameWindow : Form {
   Invalidate();
  }
  protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);renderer.Draw(e.Graphics,game,ClientSize.Width,ClientSize.Height,(float)watch.Elapsed.TotalSeconds);}
- void MoveMouse(object sender,MouseEventArgs e){
-  float s=Math.Min(ClientSize.Width/Game.Width,ClientSize.Height/Game.Height);
-  game.Input.Aim=new V((e.X-(ClientSize.Width-Game.Width*s)/2)/s,(e.Y-(ClientSize.Height-Game.Height*s)/2)/s);
- }
- bool Inside(float x,float y,float w,float h){V p=game.Input.Aim;return p.X>=x&&p.X<=x+w&&p.Y>=y&&p.Y<=y+h;}
- void MousePressed(object sender,MouseEventArgs e){
-  MoveMouse(sender,e);
-  if(e.Button==MouseButtons.Right){game.Input.Dash=true;return;}
-  if(e.Button!=MouseButtons.Left)return;
-  Stage state=game.State;
-  if(state==Stage.Story){game.ContinueStory();ClearInput();}
-  else if(state==Stage.Title){NewRun();}
-  else if(state==Stage.Upgrade){
-   if(Inside(300,300,680,62))game.SelectUpgrade(0);
-   else if(Inside(300,382,680,62))game.SelectUpgrade(1);
-   else if(Inside(300,464,680,62))game.SelectUpgrade(2);
+  void MoveMouse(object sender,MouseEventArgs e){
+   float s=Math.Min(ClientSize.Width/Game.Width,ClientSize.Height/Game.Height);
+   game.Input.Aim=new V((e.X-(ClientSize.Width-Game.Width*s)/2)/s,(e.Y-(ClientSize.Height-Game.Height*s)/2)/s);
+   SyncMenuHover();
   }
-  else if(state==Stage.Paused){if(Inside(300,315,680,62))game.Pause();else if(Inside(300,400,680,62))game.State=Stage.Title;}
-  else if(state==Stage.Dead||state==Stage.Won){if(Inside(300,420,680,62))NewRun();else if(Inside(300,505,680,62))game.State=Stage.Title;}
-  else if(state==Stage.Playing)game.Input.Fire=true;
- }
+  void SyncMenuHover(){
+   RectangleF[] items=MenuLayout.Items(game.State);
+   for(int i=0;i<items.Length;i++)if(items[i].Contains(game.Input.Aim.X,game.Input.Aim.Y)){game.Menu=i;return;}
+  }
+  void MenuMove(int delta){game.MoveMenu(delta,MenuLayout.Items(game.State).Length);}
+  void ToggleSound(){game.ToggleSound();audio.Muted=!game.SoundOn;ClearInput();}
+  void ActivateMenu(int index){
+   Stage state=game.State;
+   if(state==Stage.Title){
+    if(index==0)NewRun();
+    else if(index==1)game.ShowHelp();
+    else if(index==2)ToggleSound();
+    else if(index==3)Application.Exit();
+   } else if(state==Stage.Help){game.CloseHelp();ClearInput();}
+   else if(state==Stage.Paused){
+    if(index==0)game.Pause();
+    else if(index==1)game.ShowHelp();
+    else if(index==2)ToggleSound();
+    else if(index==3){game.ReturnToTitle();ClearInput();}
+   } else if(state==Stage.Upgrade){game.SelectUpgrade(index);ClearInput();}
+   else if(state==Stage.Dead||state==Stage.Won){
+    if(index==0)NewRun();
+    else if(index==1){game.ReturnToTitle();ClearInput();}
+   }
+  }
+  void MousePressed(object sender,MouseEventArgs e){
+   MoveMouse(sender,e);
+   if(e.Button==MouseButtons.Right){game.Input.Dash=true;return;}
+   if(e.Button!=MouseButtons.Left)return;
+   Stage state=game.State;
+   if(state==Stage.Story){game.ContinueStory();ClearInput();return;}
+   if(state==Stage.Playing){game.Input.Fire=true;return;}
+   int hit=MenuLayout.Hit(state,game.Input.Aim);
+   if(hit>=0)ActivateMenu(hit);
+  }
  void MouseReleased(object sender,MouseEventArgs e){if(e.Button==MouseButtons.Left)game.Input.Fire=false;}
  void NewRun(){ClearInput();game.Start(Environment.TickCount);}
- void Down(object sender,KeyEventArgs e){
-  e.SuppressKeyPress=true;Keys k=e.KeyCode;
-  if(k==Keys.F11){ToggleFullscreen();return;}
-  if(k==Keys.M){audio.Muted=!audio.Muted;return;}
-  if(k==Keys.F8){renderer.ReduceMotion=!renderer.ReduceMotion;return;}
-  if(k==Keys.Enter&&game.State==Stage.Story){game.ContinueStory();ClearInput();return;}
-  if(k==Keys.J&&game.State==Stage.Playing){game.State=Stage.Story;ClearInput();return;}
-  if(k==Keys.Escape){game.Pause();ClearInput();return;}
-  if(k==Keys.Enter&&(game.State==Stage.Title||game.State==Stage.Dead||game.State==Stage.Won)){NewRun();return;}
-  if(game.State==Stage.Upgrade){if(k>=Keys.D1&&k<=Keys.D3)game.SelectUpgrade(k-Keys.D1);return;}
-  if(k==Keys.A||k==Keys.Left)game.Input.Left=true;
-  if(k==Keys.D||k==Keys.Right)game.Input.Right=true;
-  if(k==Keys.S||k==Keys.Down)game.Input.Down=true;
-  if(k==Keys.Space||k==Keys.W||k==Keys.Up)game.Input.Jump=true;
-  if(k==Keys.ShiftKey)game.Input.Dash=true;
-  if(k==Keys.Q)game.Input.Flask=true;
-  if(k==Keys.E)game.Input.Use=true;
+  void Down(object sender,KeyEventArgs e){
+   e.SuppressKeyPress=true;Keys k=e.KeyCode;
+   if(k==Keys.F11){ToggleFullscreen();return;}
+   if(k==Keys.M){ToggleSound();return;}
+   if(k==Keys.F8){renderer.ReduceMotion=!renderer.ReduceMotion;return;}
+   Stage state=game.State;
+   bool menu=state==Stage.Title||state==Stage.Help||state==Stage.Upgrade||state==Stage.Paused||state==Stage.Dead||state==Stage.Won;
+   if(menu){
+    if(k==Keys.W||k==Keys.Up){MenuMove(-1);return;}
+    if(k==Keys.S||k==Keys.Down){MenuMove(1);return;}
+    if(state==Stage.Upgrade&&k>=Keys.D1&&k<=Keys.D3){game.SelectUpgrade(k-Keys.D1);ClearInput();return;}
+    if(k==Keys.Enter){ActivateMenu(game.Menu);return;}
+    if(k==Keys.Escape){
+     if(state==Stage.Help)game.CloseHelp();
+     else if(state==Stage.Paused)game.Pause();
+     ClearInput();return;
+    }
+    return;
+   }
+   if(k==Keys.Enter&&state==Stage.Story){game.ContinueStory();ClearInput();return;}
+   if(k==Keys.J&&state==Stage.Playing){game.State=Stage.Story;game.Menu=0;ClearInput();return;}
+   if(k==Keys.Escape){game.Pause();ClearInput();return;}
+   if(k==Keys.A||k==Keys.Left)game.Input.Left=true;
+   if(k==Keys.D||k==Keys.Right)game.Input.Right=true;
+   if(k==Keys.S||k==Keys.Down)game.Input.Down=true;
+   if(k==Keys.Space||k==Keys.W||k==Keys.Up)game.Input.Jump=true;
+   if(k==Keys.ShiftKey)game.Input.Dash=true;
+   if(k==Keys.Q)game.Input.Flask=true;
+   if(k==Keys.E)game.Input.Use=true;
  }
  void Up(object sender,KeyEventArgs e){
   Keys k=e.KeyCode;

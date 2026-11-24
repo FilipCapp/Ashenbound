@@ -39,9 +39,10 @@ public sealed class Renderer : IDisposable {
   if(game.State==Stage.Title){Title();return;}
   Hud();
   if(game.State==Stage.Story)StoryPage();
-  if(game.State==Stage.Upgrade)Upgrades();
-  if(game.State==Stage.Paused)Pause();
-  if(game.State==Stage.Won||game.State==Stage.Dead)End();
+  else if(game.State==Stage.Upgrade)Upgrades();
+  else if(game.State==Stage.Paused)Pause();
+  else if(game.State==Stage.Help)Help();
+  else if(game.State==Stage.Won||game.State==Stage.Dead)End();
  }
  void World(){
   foreach(RectangleF r in game.Platforms){
@@ -98,29 +99,83 @@ public sealed class Renderer : IDisposable {
   if(e.Hit>0)Box(e.P.X-8,e.P.Y-12,16,8,Color.White);
   if(e.Kind!=2){Box(e.P.X-22,e.P.Y-44,44,4,Color.FromArgb(66,36,48));Box(e.P.X-22,e.P.Y-44,44*Math.Max(0,e.Hp/e.MaxHp),4,c);}
  }
- void Title(){
-  Box(0,0,Game.Width,Game.Height,Color.FromArgb(70,6,6,12));
-  Box(66,70,5,514,Palette.Ember);
-  Text("A N   O R I G I N A L   D A R K   F A N T A S Y   R U N - A N D - G U N",94,78,16,Palette.Ember);
-  Bold("ASHENBOUND",88,143,88,Color.White);
-  Bold("THE LAST CINDER",88,228,64,Palette.Ember);
-  Text("THE SUN HAS BEEN DEAD FOR THREE WINTERS.",96,346,22,Palette.Gold);
-  Text("Carry the Last Cinder through three ruined sanctums.\nBreak the Cinder Bishop's choir. Give the world one more dawn.",98,398,21,Color.FromArgb(200,204,208));
-  Button("BEGIN THE VIGIL","ENTER",new RectangleF(98,524,405,62));
-  Text("Move fast. Chain kills. Make every second count.",98,606,17,Palette.Muted);
-  Actor(new V(1010,457),new V(1,0),3,0);
-  Box(848,551,320,3,Palette.Ember);Text("VEYRA / EMBER BEARER",859,575,16,Palette.Muted);
-  Footer();Text("M SOUND  /  F11 FULLSCREEN",961,678,14,Palette.Muted);
- }
- public void Button(string title,string key,RectangleF r){
-  bool hover=r.Contains(game.Input.Aim.X,game.Input.Aim.Y);
-  Box(r.X,r.Y,r.Width,r.Height,hover?Color.FromArgb(32,74,70):Color.FromArgb(22,36,45));
-  Box(r.X,r.Y,3,r.Height,Palette.Ember);
-  Bold(title,r.X+20,r.Y+17,20,Color.White);
-  Text(key,r.Right-90,r.Y+20,15,Palette.Ember);
- }
- void Footer(){Box(0,670,Game.Width,50,Palette.Ink);Text("A/D MOVE  SPACE JUMP  MOUSE AIM + FIRE  SHIFT/RMB DASH  Q FLASK  E GATE  S DROP",28,678,14,Palette.Muted);}
- void Hud(){
+  void Ring(float x,float y,float r,Color c,float width){using(Pen p=new Pen(c,width))g.DrawEllipse(p,x-r,y-r,r*2,r*2);}
+  void Frame(float x,float y,float w,float h,Color edge){
+   Box(x,y,w,h,Color.FromArgb(238,8,8,16));
+   Box(x,y,w,2,edge);Box(x,y+h-2,w,2,Color.FromArgb(90,edge.R,edge.G,edge.B));
+   Box(x,y,2,h,edge);Box(x+w-2,y,2,h,Color.FromArgb(90,edge.R,edge.G,edge.B));
+   Box(x,y,20,2,Palette.Gold);Box(x,y,2,20,Palette.Gold);
+   Box(x+w-20,y+h-2,20,2,Palette.Gold);Box(x+w-2,y+h-20,2,20,Palette.Gold);
+  }
+  void Sparks(float x,float y,float w,float h){
+   if(ReduceMotion)return;
+   for(int i=0;i<16;i++){
+    float t=(clock*.22f+i*.137f)%1f;
+    float px=x+((i*137)%820)+(float)Math.Sin(clock+i)*4;
+    float py=y+h-t*h;
+    Box(px,py,2,2,Color.FromArgb((int)(140*(1-t)),255,139,74));
+   }
+  }
+  void Sigil(float x,float y){
+   Ring(x,y,40,Color.FromArgb(70,255,139,74),2);
+   Ring(x,y,26,Palette.Gold,2);
+   Line(x,y-32,x,y+32,Palette.Ember,2);
+   Line(x-23,y+19,x,y-27,Palette.Ember,2);
+   Line(x+23,y+19,x,y-27,Palette.Ember,2);
+   Circle(x,y,4,Palette.Gold);
+  }
+  void Header(string kicker,string title,string sub,float x,float y){
+   Text(kicker,x,y,15,Palette.Ember);
+   Bold(title,x,y+24,44,Color.White);
+   Text(sub,x,y+78,18,Color.FromArgb(198,204,208));
+   Box(x,y+108,560,2,Color.FromArgb(90,255,139,74));
+  }
+  void MenuItem(string label,string hint,RectangleF r,int index){
+   bool hover=r.Contains(game.Input.Aim.X,game.Input.Aim.Y);
+   bool active=hover||game.Menu==index;
+   Box(r.X,r.Y,r.Width,r.Height,Color.FromArgb(active?62:24,18,18,30));
+   Box(r.X,r.Y,r.Width,2,active?Palette.Gold:Color.FromArgb(90,255,139,74));
+   Box(r.X,r.Y,5,r.Height,active?Palette.Gold:Palette.Ember);
+   Bold((active?"> ":"  ")+label,r.X+22,r.Y+16,22,active?Color.White:Palette.Ash);
+   if(hint.Length>0)Text(hint,r.Right-104,r.Y+20,16,active?Palette.Gold:Palette.Muted);
+  }
+  void MenuCard(string key,string title,string detail,RectangleF r,int index){
+   bool hover=r.Contains(game.Input.Aim.X,game.Input.Aim.Y);
+   bool active=hover||game.Menu==index;
+   Box(r.X,r.Y,r.Width,r.Height,Color.FromArgb(active?68:26,18,18,30));
+   Box(r.X,r.Y,r.Width,2,active?Palette.Gold:Color.FromArgb(80,112,214,205));
+   Box(r.X,r.Y,6,r.Height,active?Palette.Gold:Palette.Ember);
+   Bold(key,r.X+24,r.Y+29,32,active?Palette.Gold:Palette.Muted);
+   Bold(title,r.X+86,r.Y+19,24,active?Color.White:Palette.Ash);
+   Text(detail,r.X+86,r.Y+58,17,active?Color.FromArgb(220,255,205,116):Palette.Muted);
+   if(active)Text("SELECTED",r.Right-124,r.Y+64,15,Palette.Gold);
+  }
+  void ContextFooter(string message){Box(0,670,Game.Width,50,Palette.Ink);Text(message,28,678,14,Palette.Muted);}
+  void Footer(){ContextFooter("A/D MOVE  SPACE JUMP  MOUSE AIM + FIRE  SHIFT/RMB DASH  Q FLASK  E GATE  S DROP");}
+  void Title(){
+   Box(0,0,Game.Width,Game.Height,Color.FromArgb(84,6,6,14));
+   Sparks(0,40,1280,620);
+   Frame(58,54,600,590,Palette.Ember);
+   Text("AN ORIGINAL DARK FANTASY RUN-AND-GUN",88,88,15,Palette.Ember);
+   Sigil(556,112);
+   Bold("ASHENBOUND",86,150,78,Color.White);
+   Bold("THE LAST CINDER",88,226,54,Palette.Ember);
+   Box(90,300,520,2,Color.FromArgb(110,255,139,74));
+   Text("THE SUN HAS BEEN DEAD FOR THREE WINTERS.",90,324,20,Palette.Gold);
+   Text("Carry the Last Cinder through three ruined sanctums.\nBreak the Cinder Bishop's choir. Give the world one more dawn.",90,364,19,Color.FromArgb(200,204,208));
+   Actor(new V(360,548),new V(1,0),3,0);
+   Box(58,600,600,3,Palette.Ember);
+   Text("VEYRA / EMBER BEARER",88,612,16,Palette.Muted);
+   Frame(700,160,510,380,Palette.Gold);
+   Text("MENU",740,190,16,Palette.Gold);
+   RectangleF[] items=MenuLayout.Title;
+   MenuItem("NEW VIGIL","ENTER",items[0],0);
+   MenuItem("FIELD MANUAL","",items[1],1);
+   MenuItem(game.SoundOn?"SOUND ON":"SOUND OFF","M",items[2],2);
+   MenuItem("RETURN TO DESKTOP","",items[3],3);
+   ContextFooter("W/S SELECT   ENTER CONFIRM   M SOUND   F11 FULLSCREEN   F8 MOTION");
+  }
+  void Hud(){
   Box(0,0,Game.Width,88,Color.FromArgb(245,9,10,20));
   Text("ASHENBOUND",28,16,17,Palette.Ember);
   Box(28,50,230,11,Color.FromArgb(65,34,45));
@@ -143,36 +198,60 @@ public sealed class Renderer : IDisposable {
   }
   Footer();Text("ESC PAUSE / M SOUND / F11",995,678,14,Palette.Muted);
  }
- void Overlay(string title,string sub){
-  Box(0,88,Game.Width,632,Color.FromArgb(242,9,10,20));
-  Box(260,160,4,390,Palette.Ember);
-  Bold(title,294,172,45,Palette.Ember);
-  Text(sub,298,237,19,Color.FromArgb(198,204,208));
- }
- void StoryPage(){
-  Overlay("THE LAST CINDER",Campaign.Speakers[Math.Min(game.Room,3)]);
-  Text(Campaign.Scenes[Math.Min(game.Room,3)],298,285,19,Color.FromArgb(214,214,216));
-  Bold("ENTER / CLICK TO CONTINUE",298,594,18,Palette.Gold);
- }
- void Upgrades(){
-  Overlay("A BREATH BETWEEN BELLS","Choose one relic. The next sanctum is waiting.");
-  Button("CINDER EDGE  /  +15% DAMAGE","1",new RectangleF(300,300,680,62));
-  Button("ASHEN HEART  /  +30 MAX HP, HEAL 55","2",new RectangleF(300,382,680,62));
-  Button("SWIFT PILGRIM  /  FASTER FIRE + MOVEMENT","3",new RectangleF(300,464,680,62));
- }
- void Pause(){
-  Overlay("THE ASH HOLDS STILL","Take a breath. The choir can wait.");
-  Button("RESUME THE VIGIL","ESC",new RectangleF(300,315,680,62));
-  Button("RETURN TO TITLE","",new RectangleF(300,400,680,62));
-  Text("M toggles sound. F11 toggles fullscreen. F8 reduces motion.",300,504,17,Palette.Muted);
- }
- void End(){
-  bool won=game.State==Stage.Won;
-  Overlay(won?"DAWN RETURNS":"THE DUSK KEEPS YOU",won?"The Cinder takes flight. A thin red line becomes a river.":"The choir keeps the night. Another bearer will answer.");
-  Bold("SCORE "+game.Score+"     BEST CHAIN "+game.BestChain+"     SILENCED "+game.Kills,300,308,23,Palette.Gold);
-  Text("VIGIL "+(game.Seed&65535).ToString("X4")+" / "+TimeSpan.FromSeconds(game.Elapsed).ToString(@"mm\:ss"),300,354,18,Palette.Muted);
-  Button("NEW VIGIL","ENTER",new RectangleF(300,420,680,62));
-  Button("RETURN TO TITLE","",new RectangleF(300,505,680,62));
- }
+  void StoryPage(){
+   Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
+   Frame(248,124,784,526,Palette.Gold);
+   Header("SANCTUM "+(game.Room+1)+" / "+Campaign.TotalRooms,"THE LAST CINDER",Campaign.Speakers[Math.Min(game.Room,3)],294,152);
+   Sparks(248,300,784,260);
+   Text(Campaign.Scenes[Math.Min(game.Room,3)],298,282,19,Color.FromArgb(214,214,216));
+   MenuItem("CONTINUE","ENTER",MenuLayout.Story[0],0);
+   ContextFooter("ENTER / CLICK TO CONTINUE   J REOPENS THE PAGE IN PLAY");
+  }
+  void Upgrades(){
+   Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
+   Frame(220,132,840,500,Palette.Ember);
+   Header("SANCTUM CLEAR","A BREATH BETWEEN BELLS","Choose one relic. The next sanctum is waiting.",266,152);
+   MenuCard("1","CINDER EDGE","+15% DAMAGE",MenuLayout.Upgrade[0],0);
+   MenuCard("2","ASHEN HEART","+30 MAX HP / HEAL 55",MenuLayout.Upgrade[1],1);
+   MenuCard("3","SWIFT PILGRIM","FASTER FIRE AND MOVEMENT",MenuLayout.Upgrade[2],2);
+   ContextFooter("1/2/3 OR W/S + ENTER   SELECT A RELIC");
+  }
+  void Pause(){
+   Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
+   Frame(360,150,560,420,Palette.Cyan);
+   Header("TIME SUSPENDED","THE ASH HOLDS STILL","Take a breath. The choir can wait.",406,170);
+   RectangleF[] items=MenuLayout.Pause;
+   MenuItem("RESUME VIGIL","ESC",items[0],0);
+   MenuItem("FIELD MANUAL","",items[1],1);
+   MenuItem(game.SoundOn?"SOUND ON":"SOUND OFF","M",items[2],2);
+   MenuItem("RETURN TO TITLE","",items[3],3);
+   ContextFooter("W/S SELECT   ENTER CONFIRM   ESC RESUME");
+  }
+  void Help(){
+   Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
+   Frame(220,100,840,525,Palette.Cyan);
+   Header("FIELD MANUAL","HOW TO SURVIVE THE ASH","Controls and cinder-lore for the bearer.",266,132);
+   Text("MOVEMENT",266,264,16,Palette.Gold);
+   Text("A / D  or  LEFT / RIGHT      MOVE\nSPACE / W / UP               JUMP\nS / DOWN                     DROP THROUGH LEDGES\nSHIFT / RIGHT MOUSE          DASH WITH BRIEF I-FRAMES",266,290,17,Color.FromArgb(206,204,208));
+   Text("COMBAT",650,264,16,Palette.Gold);
+   Text("MOUSE                        AIM\nLEFT CLICK                   FIRE\nQ                            THROW A CINDER FLASK\nE                            OPEN A CLEARED GATE\nJ                            REOPEN THE CURRENT SCENE",650,290,17,Color.FromArgb(206,204,208));
+   Box(266,430,724,2,Color.FromArgb(90,255,139,74));
+   Text("CINDER RULES",266,448,16,Palette.Gold);
+   Text("Chain kills quickly to overcharge the Trigger and heal on every takedown.\nBreak every foe before the gate opens. Walls hold them inside the sanctum.\nDashes ignore hits. Flasks explode on impact. Stay ahead of the Bishop's choir.",266,474,17,Palette.Ash);
+   MenuItem("BACK","ESC",MenuLayout.Help[0],0);
+   ContextFooter("ESC / ENTER TO RETURN");
+  }
+  void End(){
+   bool won=game.State==Stage.Won;
+   Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
+   Frame(300,160,680,410,won?Palette.Gold:Palette.Blood);
+   Header(won?"VIGIL COMPLETE":"VIGIL ENDED",won?"DAWN RETURNS":"THE DUSK KEEPS YOU",won?"The Cinder takes flight. A thin red line becomes a river.":"The choir keeps the night. Another bearer will answer.",346,190);
+   Box(346,310,588,76,Color.FromArgb(28,20,24));
+   Bold("SCORE "+game.Score,364,322,23,Palette.Gold);
+   Text("BEST CHAIN "+game.BestChain+"     SILENCED "+game.Kills+"     VIGIL "+(game.Seed&65535).ToString("X4"),364,360,17,Palette.Muted);
+   MenuItem("NEW VIGIL","ENTER",MenuLayout.End[0],0);
+   MenuItem("RETURN TO TITLE","",MenuLayout.End[1],1);
+   ContextFooter("W/S SELECT   ENTER CONFIRM");
+  }
 }
 }

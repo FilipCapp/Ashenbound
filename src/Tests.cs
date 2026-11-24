@@ -40,9 +40,24 @@ public static class Tests {
     Game v=new Game();v.Start(seed);v.ContinueStory();Steps(v,120);
     if(v.Enemies.Count>0){if(v.Enemies[0].Kind==0)sawWalker=true;else sawWisp=true;}
    }
-   Check(sawWalker&&sawWisp,"seeds vary encounters");
+    Check(sawWalker&&sawWisp,"seeds vary encounters");
 
-   g=Fresh();g.Input.Right=true;Steps(g,60);g.Input.Right=false;
+    g=Fresh();g.Pending=0;g.Invulnerable=100000;g.Player=new V(Game.Width-60,Game.Floor-24);
+    for(int kind=0;kind<3;kind++){
+     g.Enemies.Clear();g.ExitOpen=false;
+     g.Spawn(kind,new V(Game.Width+160,kind==1?320:Game.Floor-24));
+     Steps(g,2);
+     Check(g.Enemies.Count==1&&g.Enemies[0].P.X>=Game.EnemyMargin&&g.Enemies[0].P.X<=Game.Width-Game.EnemyMargin,"enemy "+kind+" stays on screen");
+     Check(g.Enemies[0].P.Y>=170&&g.Enemies[0].P.Y<=Game.Floor-24,"enemy "+kind+" stays in arena");
+     KillAll(g);
+     Check(g.ExitOpen,"bounded enemy "+kind+" can be cleared");
+    }
+    g.Enemies.Clear();g.ExitOpen=false;g.Player=new V(1240,Game.Floor-24);
+    g.Spawn(2,new V(1215,500));Steps(g,900);
+    Check(g.Enemies.Count==1&&g.Enemies[0].P.X<=Game.Width-Game.EnemyMargin,"backing acolyte held inside right edge");
+    KillAll(g);Check(g.ExitOpen,"edge acolyte soft-lock cleared");
+
+    g=Fresh();g.Input.Right=true;Steps(g,60);g.Input.Right=false;
    Check(g.Player.X>240,"movement");
    g.Input.Jump=true;float startY=g.Player.Y,minY=startY;
    for(int i=0;i<110;i++){g.Step(1f/120);minY=Math.Min(minY,g.Player.Y);}
@@ -122,9 +137,11 @@ public static class Tests {
     foreach(string scene in Campaign.Scenes)Check(graphics.MeasureString(scene,font,626).Height<324,"story fits page");
    }
 
-   using(Renderer r=new Renderer()){
-    g=new Game();Image(r,g,"title");
-    g.Start(9);Image(r,g,"story");g.ContinueStory();
+    using(Renderer r=new Renderer()){
+     g=new Game();Image(r,g,"title");
+     g.Menu=1;Image(r,g,"title-selected");
+     g.ShowHelp();Image(r,g,"help");g.CloseHelp();
+     g.Start(9);Image(r,g,"story");g.ContinueStory();
     g.Spawn(0,new V(410,Game.Floor-24));g.Spawn(1,new V(810,320));g.Spawn(2,new V(1030,Game.Floor-24));
     g.Chain=5;g.ChainTime=3;Image(r,g,"combat");
     g.State=Stage.Upgrade;Image(r,g,"upgrade");
@@ -134,33 +151,42 @@ public static class Tests {
     }
     g.Room=2;g.EnterRoom();g.State=Stage.Playing;Image(r,g,"boss");
     g.Ending=true;g.State=Stage.Story;Image(r,g,"epilogue");g.ContinueStory();Image(r,g,"victory");
-    g.State=Stage.Dead;Image(r,g,"death");g.State=Stage.Paused;Image(r,g,"pause");
+    g.State=Stage.Dead;Image(r,g,"death");g.State=Stage.Paused;g.Menu=0;Image(r,g,"pause");g.Menu=1;Image(r,g,"pause-selected");
     using(Bitmap b=new Bitmap(960,600))using(Graphics gr=Graphics.FromImage(b)){
      r.Draw(gr,g,960,600,2);b.Save("Tests/resized.png");
      Check(b.GetPixel(0,0).ToArgb()==Color.Black.ToArgb(),"letterboxing");
     }
    }
 
-   using(GameWindow window=new GameWindow()){
-    window.Show();Application.DoEvents();
-    System.Reflection.MethodInfo key=typeof(Control).GetMethod("OnKeyDown",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-    System.Reflection.FieldInfo field=typeof(GameWindow).GetField("game",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-    Action<Keys> press=delegate(Keys k){key.Invoke(window,new object[]{new KeyEventArgs(k)});};
-    press(Keys.Enter);Game model=(Game)field.GetValue(window);
-    Check(model.State==Stage.Story,"window starts story");
-    System.Reflection.MethodInfo mouse=typeof(Control).GetMethod("OnMouseDown",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-    mouse.Invoke(window,new object[]{new MouseEventArgs(MouseButtons.Left,1,900,650,0)});
-    Check(model.State==Stage.Playing,"mouse turns story page");
-    press(Keys.J);Check(model.State==Stage.Story,"journal reopens scene");
-    press(Keys.Enter);Check(model.State==Stage.Playing&&model.Room==0,"journal resumes same room");
-    press(Keys.Escape);Check(model.State==Stage.Paused,"window pauses");
-    press(Keys.Escape);Check(model.State==Stage.Playing,"window resumes");
-    window.ClientSize=new Size(960,600);Application.DoEvents();
-    using(Bitmap b=new Bitmap(window.Width,window.Height)){window.DrawToBitmap(b,window.ClientRectangle);b.Save("Tests/window.png");}
-    window.Close();
-   }
+    using(GameWindow window=new GameWindow()){
+     window.Show();Application.DoEvents();
+     System.Reflection.MethodInfo key=typeof(Control).GetMethod("OnKeyDown",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
+     System.Reflection.FieldInfo field=typeof(GameWindow).GetField("game",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
+     System.Reflection.MethodInfo mouse=typeof(Control).GetMethod("OnMouseDown",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
+     Action<Keys> press=delegate(Keys k){key.Invoke(window,new object[]{new KeyEventArgs(k)});};
+     Action<int,int,MouseButtons> click=delegate(int x,int y,MouseButtons button){mouse.Invoke(window,new object[]{new MouseEventArgs(button,1,x,y,0)});};
+     Game model=(Game)field.GetValue(window);
+     Check(model.State==Stage.Title&&model.Menu==0,"window opens title menu");
+     bool sound=model.SoundOn;press(Keys.M);Check(model.SoundOn!=sound,"window sound toggle");press(Keys.M);Check(model.SoundOn==sound,"window sound restored");
+     press(Keys.S);Check(model.Menu==1,"menu keyboard navigation");
+     press(Keys.W);Check(model.Menu==0,"menu navigation wraps");
+     click(900,650,MouseButtons.Left);Check(model.State==Stage.Title,"click outside menu keeps title");
+     click(900,341,MouseButtons.Left);Check(model.State==Stage.Help,"mouse activates field manual");
+     press(Keys.Escape);Check(model.State==Stage.Title,"field manual returns to title");
+     press(Keys.Enter);Check(model.State==Stage.Story,"window starts story");
+     click(900,650,MouseButtons.Left);Check(model.State==Stage.Playing,"mouse turns story page");
+     press(Keys.J);Check(model.State==Stage.Story,"journal reopens scene");
+     press(Keys.Enter);Check(model.State==Stage.Playing&&model.Room==0,"journal resumes same room");
+     press(Keys.Escape);Check(model.State==Stage.Paused&&model.Menu==0,"window pauses");
+     press(Keys.S);press(Keys.Enter);Check(model.State==Stage.Help&&model.HelpReturn==Stage.Paused,"pause opens field manual");
+     press(Keys.Escape);Check(model.State==Stage.Paused,"field manual returns to pause");
+     press(Keys.Escape);Check(model.State==Stage.Playing,"window resumes");
+     window.ClientSize=new Size(960,600);Application.DoEvents();
+     using(Bitmap b=new Bitmap(window.Width,window.Height)){window.DrawToBitmap(b,window.ClientRectangle);b.Save("Tests/window.png");}
+     window.Close();
+    }
 
-   File.WriteAllText("Tests/results.txt","PASS: "+checks+" checks. Procedural pixel rendering, 3 sanctums, story gating, boss phases, combo, hazards, flasks, full combat run and native window controls.\n");
+    File.WriteAllText("Tests/results.txt","PASS: "+checks+" checks. Procedural pixel rendering, 3 sanctums, bounded enemies, redesigned menus, story gating, boss phases, combo, hazards, flasks, full combat run and native window controls.\n");
    return 0;
   }catch(Exception e){
    File.WriteAllText("Tests/results.txt","FAIL after "+checks+" checks: "+e);
