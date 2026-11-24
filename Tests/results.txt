@@ -1,0 +1,1 @@
+PASS: 73 checks. Procedural pixel rendering, 3 sanctums, story gating, boss phases, combo, hazards, flasks, full combat run and native window controls.
