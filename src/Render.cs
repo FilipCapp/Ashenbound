@@ -16,12 +16,19 @@ public sealed class Renderer : IDisposable {
     for(int i=0;i<names.Length;i++){try{return new FontFamily(names[i]);}catch{}}
     return new FontFamily(FontFamily.GenericSerif.Name);
    }
-   static StringFormat CreateFormat(){
-    StringFormat result=new StringFormat(StringFormatFlags.NoClip|StringFormatFlags.NoWrap);
-    result.Alignment=StringAlignment.Near;result.LineAlignment=StringAlignment.Near;result.Trimming=StringTrimming.None;
-    return result;
-   }
-  void Box(float x,float y,float w,float h,Color c){if(w<=0||h<=0)return;using(var b=new SolidBrush(c))g.FillRectangle(b,x,y,w,h);}
+    static StringFormat CreateFormat(){
+     StringFormat result=new StringFormat(StringFormatFlags.NoClip|StringFormatFlags.NoWrap);
+     result.Alignment=StringAlignment.Near;result.LineAlignment=StringAlignment.Near;result.Trimming=StringTrimming.None;
+     return result;
+    }
+    public static string RelicLabel(UpgradeDef def,int stack,bool offer){
+     if(def.Stackable){
+      if(def.MaxStacks<99&&stack>=def.MaxStacks)return "STACKABLE MAX";
+      return def.MaxStacks>=99?"STACKABLE x"+stack:"STACKABLE x"+stack+"/"+def.MaxStacks;
+     }
+     return !offer&&stack>0?"OWNED":"";
+    }
+   void Box(float x,float y,float w,float h,Color c){if(w<=0||h<=0)return;using(var b=new SolidBrush(c))g.FillRectangle(b,x,y,w,h);}
   void Line(float x,float y,float x2,float y2,Color c,float width){using(var p=new Pen(c,width))g.DrawLine(p,x,y,x2,y2);}
   void Text(string s,float x,float y,float size,Color c){using(var f=new Font(family,size,FontStyle.Regular,GraphicsUnit.Pixel))using(var b=new SolidBrush(c))g.DrawString(s,f,b,x,y,format);}
   void Bold(string s,float x,float y,float size,Color c){using(var f=new Font(family,size,FontStyle.Bold,GraphicsUnit.Pixel))using(var b=new SolidBrush(c))g.DrawString(s,f,b,x,y,format);}
@@ -210,24 +217,30 @@ public sealed class Renderer : IDisposable {
       if(hintX>=labelX+Measure(shown,21,true)+12)Text(hint,hintX,r.Y+16,14,active?Palette.Gold:Palette.Muted);
      }
     }
-    void MenuCard(string key,string title,string detail,RectangleF r,int index){
-     bool hover=r.Contains(game.Input.Aim.X,game.Input.Aim.Y);
-     bool active=hover||game.Menu==index;
-     bool compact=r.Height<72;
-     Panel(r,active,index+13);
-     Box(r.X+8,r.Y+8,8,r.Height-16,active?Palette.Gold:Palette.Ember);
-     Box(r.X+72,r.Y+10,1,r.Height-20,Color.FromArgb(50,255,205,116));
-     float keySize=compact?25:32,titleSize=compact?21:24,detailSize=compact?13:16;
-     float keyY=compact?r.Y+13:r.Y+29,titleY=compact?r.Y+13:r.Y+19,detailY=compact?r.Y+37:r.Y+58;
-     Bold(key,r.X+24,keyY,keySize,active?Palette.Gold:Palette.Muted);
-     Bold(title,r.X+86,titleY,titleSize,active?Color.White:Palette.Ash);
-     Text(detail,r.X+86,detailY,detailSize,active?Color.FromArgb(220,255,205,116):Palette.Muted);
-     if(active){
-      float badgeWidth=Measure("SELECTED",14,false);float badgeX=r.Right-18-badgeWidth;
-      float badgeY=compact?r.Y+39:r.Y+64;
-      if(badgeX>=r.X+86+Measure(detail,detailSize,false)+12)Text("SELECTED",badgeX,badgeY,14,Palette.Gold);
+     void MenuCard(string key,string title,string detail,RectangleF r,int index,string meta="",bool enabled=true){
+      bool hover=r.Contains(game.Input.Aim.X,game.Input.Aim.Y);
+      bool active=enabled&&(hover||game.Menu==index);
+      bool compact=r.Height<72;
+      Panel(r,active,index+13);
+      Box(r.X+8,r.Y+8,8,r.Height-16,active?Palette.Gold:Palette.Ember);
+      Box(r.X+72,r.Y+10,1,r.Height-20,Color.FromArgb(50,255,205,116));
+      float keySize=compact?25:32,titleSize=compact?21:24,detailSize=compact?13:16;
+      float keyY=compact?r.Y+13:r.Y+29,titleY=compact?r.Y+13:r.Y+19,detailY=compact?r.Y+37:r.Y+58;
+      Bold(key,r.X+24,keyY,keySize,active?Palette.Gold:Palette.Muted);
+      Bold(title,r.X+86,titleY,titleSize,active?Color.White:Palette.Ash);
+      Text(detail,r.X+86,detailY,detailSize,active?Color.FromArgb(220,255,205,116):Palette.Muted);
+      if(meta.Length>0){
+       float metaSize=compact?12:13,metaWidth=Measure(meta,metaSize,false);
+       float metaX=r.Right-18-metaWidth,metaY=compact?r.Y+8:r.Y+16;
+       float titleEnd=r.X+86+Measure(title,titleSize,true);
+       if(metaX>=titleEnd+12)Text(meta,metaX,metaY,metaSize,enabled?(active?Palette.Gold:Color.FromArgb(180,255,205,116)):Palette.Muted);
+      }
+      if(active){
+       float badgeWidth=Measure("SELECTED",14,false);float badgeX=r.Right-18-badgeWidth;
+       float badgeY=compact?r.Y+39:r.Y+64;
+       if(badgeX>=r.X+86+Measure(detail,detailSize,false)+12)Text("SELECTED",badgeX,badgeY,14,Palette.Gold);
+      }
      }
-    }
    void ContextFooter(string message){Box(0,670,Game.Width,50,Palette.Ink);Text(message,28,678,14,Palette.Muted);}
    void Footer(){
     Box(0,670,Game.Width,50,Palette.Ink);
@@ -312,20 +325,19 @@ public sealed class Renderer : IDisposable {
     MenuItem("WITNESS THE DAWN","ENTER",MenuLayout.Epilogue[0],0);
     ContextFooter("ENTER / CLICK TO SEE THE VICTORY RECORD");
    }
-  static UpgradeDef UpgradeFor(RelicKind kind){
-   for(int i=0;i<Campaign.Upgrades.Length;i++)if(Campaign.Upgrades[i].Kind==kind)return Campaign.Upgrades[i];
-   return Campaign.Upgrades[0];
-  }
-  void Upgrades(){
-   Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
-   Frame(220,132,840,500,Palette.Ember);
-   Header("SANCTUM CLEAR","A BREATH BETWEEN BELLS","Choose one relic. The next sanctum is waiting.",266,152);
-   for(int i=0;i<game.UpgradeChoices.Length;i++){
-    UpgradeDef def=UpgradeFor(game.UpgradeChoices[i]);
-    MenuCard((i+1).ToString(),def.Name,def.Detail,MenuLayout.Upgrade[i],i);
+   static UpgradeDef UpgradeFor(RelicKind kind){return Campaign.UpgradeFor(kind);}
+   void Upgrades(){
+    Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
+    Frame(220,132,840,500,Palette.Ember);
+    Header("SANCTUM CLEAR","A BREATH BETWEEN BELLS","Choose one relic. The next sanctum is waiting.",266,152);
+    for(int i=0;i<game.UpgradeChoices.Length;i++){
+     RelicKind kind=game.UpgradeChoices[i];
+     UpgradeDef def=UpgradeFor(kind);
+     if(def==null){MenuCard((i+1).ToString(),"NO RELIC","ALL RELICS CLAIMED",MenuLayout.Upgrade[i],i,"",false);continue;}
+     MenuCard((i+1).ToString(),def.Name,def.Detail,MenuLayout.Upgrade[i],i,RelicLabel(def,game.OwnedStacks(kind),true));
+    }
+    ContextFooter("1/2/3 OR W/S + ENTER   SELECT A RELIC");
    }
-   ContextFooter("1/2/3 OR W/S + ENTER   SELECT A RELIC");
-  }
    void Triangle(float x1,float y1,float x2,float y2,float x3,float y3,Color c){
     using(SolidBrush b=new SolidBrush(c))g.FillPolygon(b,new PointF[]{new PointF(x1,y1),new PointF(x2,y2),new PointF(x3,y3)});
    }
@@ -476,16 +488,19 @@ public sealed class Renderer : IDisposable {
      Box(0,88,Game.Width,632,Color.FromArgb(238,8,8,16));
      Frame(180,104,920,560,Palette.Gold);
      Header("CINDER LEDGER","ABILITIES MANUAL","Nine relics can change the shape of a vigil.",226,126);
-     for(int i=0;i<Campaign.Upgrades.Length;i++){
-      float x=226+(i%3)*290,y=246+(i/3)*114;
-      RectangleF card=new RectangleF(x,y,270,98);
-       bool active=card.Contains(game.Input.Aim.X,game.Input.Aim.Y);
-       Panel(card,active,40+i);
-       Box(card.X+54,card.Y+10,1,card.Height-20,Color.FromArgb(50,255,205,116));
-       Bold((i+1).ToString("00"),card.X+16,card.Y+20,17,active?Palette.Gold:Palette.Muted);
-       Bold(Campaign.Upgrades[i].Name,card.X+68,card.Y+16,17,active?Color.White:Palette.Ash);
-       Text(Campaign.Upgrades[i].Detail,card.X+18,card.Y+56,14,active?Palette.Gold:Palette.Muted);
-     }
+      for(int i=0;i<Campaign.Upgrades.Length;i++){
+       float x=226+(i%3)*290,y=246+(i/3)*114;
+       RectangleF card=new RectangleF(x,y,270,98);
+       UpgradeDef def=Campaign.Upgrades[i];int stack=game.OwnedStacks(def.Kind);
+        bool active=card.Contains(game.Input.Aim.X,game.Input.Aim.Y);
+        Panel(card,active,40+i);
+        Box(card.X+54,card.Y+10,1,card.Height-20,Color.FromArgb(50,255,205,116));
+        Bold((i+1).ToString("00"),card.X+16,card.Y+20,17,active?Palette.Gold:Palette.Muted);
+        Bold(def.Name,card.X+68,card.Y+16,17,active?Color.White:Palette.Ash);
+        Text(def.Detail,card.X+18,card.Y+56,14,active?Palette.Gold:Palette.Muted);
+        string meta=RelicLabel(def,stack,false);
+        if(meta.Length>0){float metaWidth=Measure(meta,12,false);Text(meta,card.Right-14-metaWidth,card.Y+77,12,stack>0?Palette.Gold:Palette.Muted);}
+      }
      MenuItem("BACK","ESC",MenuLayout.Abilities[0],0);
      ContextFooter("ESC / ENTER TO RETURN");
     }

@@ -40,18 +40,21 @@ public class Hazard {
  public readonly List<Hazard> Hazards=new List<Hazard>();
   Rng random=new Rng(1);float spawn;public Action<int> PlaySound;
   Rng relicRandom=new Rng(1);
-  public readonly RelicKind[] UpgradeChoices=new RelicKind[3];
-  public float SunriseTime,FlaskRadius=1f,DashCooldownScale=1f,DamageTakenScale=1f,HealPerKill;
+   public readonly RelicKind[] UpgradeChoices=new RelicKind[3];
+   public readonly int[] RelicStacks=new int[Campaign.Upgrades.Length];
+   public float SunriseTime,FlaskRadius=1f,DashCooldownScale=1f,DamageTakenScale=1f,HealPerKill;
   public int Pierce,SideShots;
-   public Game(){Difficulty=Campaign.DefaultDifficulty;relicRandom=new Rng(1);RollUpgrades();}
-   public bool Overcharged{get{return Chain>=8;}}
+    public Game(){Difficulty=Campaign.DefaultDifficulty;relicRandom=new Rng(1);RollUpgrades();}
+    public bool Overcharged{get{return Chain>=8;}}
+    public int OwnedStacks(RelicKind kind){int i=(int)kind;return i>=0&&i<RelicStacks.Length?RelicStacks[i]:0;}
    public void Start(int seed){Start(seed,Difficulty);}
    public void Start(int seed,int difficulty){
     Difficulty=(int)Clamp(difficulty,0,Campaign.Difficulties.Length-1);
     Seed=seed;Menu=0;HelpReturn=Stage.Title;random=new Rng(seed);relicRandom=new Rng(seed^0x5F3759DF);Room=Score=Kills=Chain=BestChain=UpgradeCount=0;
    Health=MaxHealth=100;Damage=26;FireRate=.15f;Speed=315;Flasks=3;Elapsed=0;Ending=false;
-   Pierce=0;SideShots=0;FlaskRadius=1f;DashCooldownScale=1f;DamageTakenScale=1f;HealPerKill=0;SunriseTime=0;
-   RollUpgrades();EnterRoom();State=Stage.Story;
+    Pierce=0;SideShots=0;FlaskRadius=1f;DashCooldownScale=1f;DamageTakenScale=1f;HealPerKill=0;SunriseTime=0;
+    Array.Clear(RelicStacks,0,RelicStacks.Length);
+    RollUpgrades();EnterRoom();State=Stage.Story;
   }
   public void ContinueStory(){
    if(State!=Stage.Story)return;
@@ -61,15 +64,16 @@ public class Hazard {
    if(State!=Stage.Sunrise)return;
    SunriseTime=SunriseDuration;State=Stage.Won;Menu=0;Input.ClearEdges();
   }
-  public void RollUpgrades(){
-   List<int> pool=new List<int>();
-   for(int i=0;i<Campaign.Upgrades.Length;i++)pool.Add(i);
-   for(int i=0;i<UpgradeChoices.Length;i++){
-    int pick=relicRandom.Next(0,pool.Count);
-    UpgradeChoices[i]=Campaign.Upgrades[pool[pick]].Kind;
-    pool.RemoveAt(pick);
+   public void RollUpgrades(){
+    List<int> pool=new List<int>();
+    for(int i=0;i<Campaign.Upgrades.Length;i++)if(RelicStacks[i]<Campaign.Upgrades[i].MaxStacks)pool.Add(i);
+    for(int i=0;i<UpgradeChoices.Length;i++){
+     if(pool.Count==0){UpgradeChoices[i]=RelicKind.None;continue;}
+     int pick=relicRandom.Next(0,pool.Count);
+     UpgradeChoices[i]=Campaign.Upgrades[pool[pick]].Kind;
+     pool.RemoveAt(pick);
+    }
    }
-  }
  public void EnterRoom(){
   Platforms.Clear();Enemies.Clear();Bullets.Clear();Particles.Clear();Hazards.Clear();
   Player=new V(95,Floor-24);Velocity=new V();Aim=new V(1,0);Grounded=true;
@@ -119,24 +123,27 @@ public class Hazard {
    public void SetVolume(int index,float value){if(index<0||index>2)return;Volume[index]=Clamp(value,0,1);}
   public void AdjustVolume(int index,float delta){SetVolume(index,Volume[index]+delta);}
   public void ReturnToTitle(){State=Stage.Title;Menu=0;Input.Fire=false;Input.ClearEdges();}
-  public void SelectUpgrade(int n){
-   if(State!=Stage.Upgrade||n<0||n>=UpgradeChoices.Length)return;
-   ApplyUpgrade(UpgradeChoices[n]);
-   UpgradeCount++;Room++;RollUpgrades();EnterRoom();State=Stage.Story;Menu=0;Sound(ClearSound);
-  }
-  public void ApplyUpgrade(RelicKind kind){
-   switch(kind){
-    case RelicKind.Damage:Damage*=1.15f;break;
-    case RelicKind.Vitality:MaxHealth+=30;Health=Math.Min(MaxHealth,Health+55);break;
-    case RelicKind.Swift:FireRate=Math.Max(.07f,FireRate*.9f);Speed=Math.Min(405,Speed+12);break;
-    case RelicKind.Pierce:Pierce=Math.Min(3,Pierce+1);break;
-    case RelicKind.Split:SideShots=2;break;
-    case RelicKind.Flask:Flasks++;FlaskRadius=Math.Min(1.6f,FlaskRadius+.25f);break;
-    case RelicKind.Dash:DashCooldownScale=Math.Max(.5f,DashCooldownScale-.22f);break;
-    case RelicKind.Siphon:HealPerKill+=4;break;
-    case RelicKind.Ward:DamageTakenScale=Math.Max(.65f,DamageTakenScale-.2f);break;
+   public void SelectUpgrade(int n){
+    if(State!=Stage.Upgrade||n<0||n>=UpgradeChoices.Length||UpgradeChoices[n]==RelicKind.None)return;
+    ApplyUpgrade(UpgradeChoices[n]);
+    UpgradeCount++;Room++;RollUpgrades();EnterRoom();State=Stage.Story;Menu=0;Sound(ClearSound);
    }
-  }
+   public void ApplyUpgrade(RelicKind kind){
+    int i=(int)kind;
+    if(i<0||i>=RelicStacks.Length||RelicStacks[i]>=Campaign.Upgrades[i].MaxStacks)return;
+    RelicStacks[i]++;
+    switch(kind){
+     case RelicKind.Damage:Damage*=1.15f;break;
+     case RelicKind.Vitality:MaxHealth+=30;Health=Math.Min(MaxHealth,Health+55);break;
+     case RelicKind.Swift:FireRate=Math.Max(.07f,FireRate*.9f);Speed=Math.Min(405,Speed+12);break;
+     case RelicKind.Pierce:Pierce=Math.Min(3,Pierce+1);break;
+     case RelicKind.Split:SideShots=2;break;
+     case RelicKind.Flask:Flasks++;FlaskRadius=Math.Min(1.6f,FlaskRadius+.25f);break;
+     case RelicKind.Dash:DashCooldownScale=Math.Max(.5f,1f-.125f*RelicStacks[i]);break;
+     case RelicKind.Siphon:HealPerKill+=4;break;
+     case RelicKind.Ward:DamageTakenScale=Math.Max(.65f,1f-.2f*RelicStacks[i]);break;
+    }
+   }
    public void Hurt(float amount){
     if(State!=Stage.Playing||Invulnerable>0)return;
     float damage=Math.Max(1,(int)Math.Ceiling(amount*DamageTakenScale*Campaign.Difficulties[Difficulty].IncomingDamage));

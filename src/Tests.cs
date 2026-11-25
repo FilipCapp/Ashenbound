@@ -103,8 +103,29 @@ public static class Tests {
       string set=roll.UpgradeChoices[0]+"/"+roll.UpgradeChoices[1]+"/"+roll.UpgradeChoices[2];
       if(set!=firstRoll)rollsVary=true;
      }
-     Check(rollsVary,"relic offers vary by seed");
-     Game dawn=Fresh();dawn.Ending=true;dawn.State=Stage.Story;dawn.ContinueStory();
+      Check(rollsVary,"relic offers vary by seed");
+      Check(!Campaign.UpgradeFor(RelicKind.Split).Stackable&&Campaign.UpgradeFor(RelicKind.Split).MaxStacks==1,"split is one-time");
+      Check(Campaign.UpgradeFor(RelicKind.Damage).Stackable&&Campaign.UpgradeFor(RelicKind.Damage).MaxStacks==99,"damage stacks");
+      Check(Campaign.UpgradeFor(RelicKind.Swift).MaxStacks==8&&Campaign.UpgradeFor(RelicKind.Pierce).MaxStacks==3,"capped relics declare limits");
+      Check(Campaign.UpgradeFor(RelicKind.Dash).MaxStacks==4&&Campaign.UpgradeFor(RelicKind.Ward).MaxStacks==2,"dash and ward declare limits");
+      Check(Campaign.UpgradeFor(RelicKind.None)==null,"empty relic resolves to no definition");
+      bool ownedHidden=true,stackSeen=false;
+      for(int seed=0;seed<64;seed++){
+       Game roll=new Game();roll.Start(seed);roll.RelicStacks[(int)RelicKind.Split]=1;roll.RollUpgrades();
+       for(int i=0;i<roll.UpgradeChoices.Length;i++){
+        if(roll.UpgradeChoices[i]==RelicKind.Split)ownedHidden=false;
+        if(roll.UpgradeChoices[i]==RelicKind.Pierce)stackSeen=true;
+       }
+      }
+      Check(ownedHidden,"owned non-stackable relics are not offered");Check(stackSeen,"stackable relics can be offered again");
+      Game capped=Fresh();capped.RelicStacks[(int)RelicKind.Pierce]=3;
+      bool cappedHidden=true;
+      for(int seed=0;seed<64;seed++){
+       Game roll=new Game();roll.Start(seed);roll.RelicStacks[(int)RelicKind.Pierce]=3;roll.RollUpgrades();
+       for(int i=0;i<roll.UpgradeChoices.Length;i++)if(roll.UpgradeChoices[i]==RelicKind.Pierce)cappedHidden=false;
+      }
+      Check(cappedHidden,"maxed stackable relics are not offered");
+      Game dawn=Fresh();dawn.Ending=true;dawn.State=Stage.Story;dawn.ContinueStory();
      Check(dawn.State==Stage.Sunrise&&dawn.SunriseTime==0,"epilogue opens sunrise");
      Steps(dawn,60);Check(dawn.State==Stage.Sunrise&&dawn.SunriseTime>0,"sunrise advances");
      Steps(dawn,700);Check(dawn.State==Stage.Won,"sunrise finishes after six seconds");
@@ -199,6 +220,13 @@ public static class Tests {
     relic.State=Stage.Playing;relic.Invulnerable=0;float wardHp=relic.Health;relic.Hurt(20);
     Check(Math.Abs((wardHp-relic.Health)-16)<.001f,"ward relic reduces incoming damage");
 
+    Game stacks=Fresh();Check(stacks.OwnedStacks(RelicKind.Damage)==0,"new run has no owned relics");
+    stacks.State=Stage.Upgrade;Choose(stacks,RelicKind.Damage);Check(stacks.OwnedStacks(RelicKind.Damage)==1,"selecting a relic records a stack");
+    stacks.Start(999);Check(stacks.OwnedStacks(RelicKind.Damage)==0,"new run clears owned relics");
+    Game dashStacks=Fresh();
+    for(int i=1;i<=4;i++){dashStacks.ApplyUpgrade(RelicKind.Dash);Check(Math.Abs(dashStacks.DashCooldownScale-Math.Max(.5f,1f-.125f*i))<.001f,"dash stack "+i+" reduces recovery");}
+    dashStacks.ApplyUpgrade(RelicKind.Dash);Check(dashStacks.OwnedStacks(RelicKind.Dash)==4,"dash cannot exceed four stacks");
+
    g=Fresh();g.Room=2;g.EnterRoom();g.ContinueStory();
    Enemy boss=g.Enemies[0];boss.Fire=.001f;boss.Hp=boss.MaxHp*.8f;Steps(g,10);
    Check(g.Bullets.Exists(delegate(Bullet b){return b.Hostile;}),"boss fires projectiles");
@@ -284,6 +312,13 @@ public static class Tests {
       g.State=Stage.Upgrade;Image(r,g,"upgrade");
       foreach(UpgradeDef def in Campaign.Upgrades)Check(86+r.TextWidth(def.Name,24,true)+18<=MenuLayout.Upgrade[0].Width&&86+r.TextWidth(def.Detail,16,false)+18<=MenuLayout.Upgrade[0].Width,"relic card fits: "+def.Name);
       foreach(UpgradeDef def in Campaign.Upgrades)Check(68+r.TextWidth(def.Name,17,true)+18<=270&&18+r.TextWidth(def.Detail,14,false)+18<=270,"ability card fits: "+def.Name);
+       foreach(UpgradeDef def in Campaign.Upgrades){
+        string label=Renderer.RelicLabel(def,1,true),owned=Renderer.RelicLabel(def,def.MaxStacks,false);
+        Check(!def.Stackable||label.StartsWith("STACKABLE"),"stackable relic label: "+def.Name);
+        Check(def.Stackable||owned=="OWNED","owned relic label: "+def.Name);
+        Check(18+r.TextWidth(label,13,false)+18<=MenuLayout.Upgrade[0].Width,"relic stack label fits: "+def.Name);
+        Check(14+r.TextWidth(label,12,false)+14<=270,"ability stack label fits: "+def.Name);
+       }
       foreach(DifficultyDef d in Campaign.Difficulties)Check(86+r.TextWidth(d.Name,21,true)+18<=MenuLayout.Difficulty[0].Width&&86+r.TextWidth(d.Detail,13,false)+18<=MenuLayout.Difficulty[0].Width,"difficulty card fits: "+d.Name);
       Check(37+13<=MenuLayout.Difficulty[0].Height&&39+14<=MenuLayout.Difficulty[0].Height,"difficulty card text stays inside compact frame");
     for(int room=0;room<3;room++){

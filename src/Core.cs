@@ -79,11 +79,12 @@ public static class Palette {
  public static readonly Color Muted=Color.FromArgb(137,139,151);
  public static readonly Color Violet=Color.FromArgb(126,84,143);
 }
-public enum RelicKind { Damage, Vitality, Swift, Pierce, Split, Flask, Dash, Siphon, Ward }
+public enum RelicKind { Damage, Vitality, Swift, Pierce, Split, Flask, Dash, Siphon, Ward, None }
 
 public sealed class UpgradeDef {
  public readonly RelicKind Kind;public readonly string Name;public readonly string Detail;
- public UpgradeDef(RelicKind kind,string name,string detail){Kind=kind;Name=name;Detail=detail;}
+ public readonly bool Stackable;public readonly int MaxStacks;
+ public UpgradeDef(RelicKind kind,string name,string detail,int maxStacks){Kind=kind;Name=name;Detail=detail;MaxStacks=maxStacks;Stackable=maxStacks>1;}
 }
 public sealed class DifficultyDef {
  public readonly string Name;public readonly string Detail;
@@ -110,17 +111,21 @@ public static class Campaign {
    new DifficultyDef("NIGHTMARE","The dusk has learned your name. Foes are relentless and no wound is small.",1.8f,1.9f)
   };
   public static readonly UpgradeDef[] Upgrades={
-  new UpgradeDef(RelicKind.Damage,"CINDER EDGE","+15% DAMAGE"),
-  new UpgradeDef(RelicKind.Vitality,"ASHEN HEART","+30 MAX HP / HEAL 55"),
-  new UpgradeDef(RelicKind.Swift,"SWIFT PILGRIM","FASTER FIRE AND MOVEMENT"),
-  new UpgradeDef(RelicKind.Pierce,"EMBER LANCE","FIREBALLS PIERCE FOES"),
-  new UpgradeDef(RelicKind.Split,"FORKED FLAME","FIRE TWO ANGLED EMBERS"),
-  new UpgradeDef(RelicKind.Flask,"CINDER FLASK","EXTRA FLASK / WIDER BLAST"),
-  new UpgradeDef(RelicKind.Dash,"ASHEN STEP","FASTER DASH RECOVERY"),
-  new UpgradeDef(RelicKind.Siphon,"PYRE BLOOD","MORE HEAL ON TAKEDOWNS"),
-  new UpgradeDef(RelicKind.Ward,"CINDER WARD","TAKE 20% LESS DAMAGE")
- };
- public static Color Accent(int room){return room==0?Palette.Cyan:room==1?Palette.Ember:Palette.Violet;}
+   new UpgradeDef(RelicKind.Damage,"CINDER EDGE","+15% DAMAGE",99),
+   new UpgradeDef(RelicKind.Vitality,"ASHEN HEART","+30 MAX HP / HEAL 55",99),
+   new UpgradeDef(RelicKind.Swift,"SWIFT PILGRIM","FASTER FIRE AND MOVEMENT",8),
+   new UpgradeDef(RelicKind.Pierce,"EMBER LANCE","FIREBALLS PIERCE FOES",3),
+   new UpgradeDef(RelicKind.Split,"FORKED FLAME","FIRE TWO ANGLED EMBERS",1),
+   new UpgradeDef(RelicKind.Flask,"CINDER FLASK","EXTRA FLASK / WIDER BLAST",99),
+   new UpgradeDef(RelicKind.Dash,"ASHEN STEP","FASTER DASH RECOVERY",4),
+   new UpgradeDef(RelicKind.Siphon,"PYRE BLOOD","MORE HEAL ON TAKEDOWNS",99),
+   new UpgradeDef(RelicKind.Ward,"CINDER WARD","TAKE 20% LESS DAMAGE",2)
+  };
+  public static UpgradeDef UpgradeFor(RelicKind kind){
+   for(int i=0;i<Upgrades.Length;i++)if(Upgrades[i].Kind==kind)return Upgrades[i];
+   return null;
+  }
+  public static Color Accent(int room){return room==0?Palette.Cyan:room==1?Palette.Ember:Palette.Violet;}
 }
 public sealed class Rng {
  uint state;
