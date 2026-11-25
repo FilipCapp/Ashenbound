@@ -26,6 +26,11 @@ public static class SelfTest
         Check(MenuLayout.Hit(Stage.Title, new V(100, 100)) == -1, "title hit test outside", report, ref pass, ref failed);
         Check(MenuLayout.Hit(Stage.Story, new V(800, 630), true) == 0, "epilogue hit test", report, ref pass, ref failed);
         Check(MenuLayout.Hit(Stage.Audio, new V(340, 270)) == 0, "audio slider hit test", report, ref pass, ref failed);
+        Check(MenuLayout.Upgrade.Length == 3 && MenuLayout.Upgrade[0].Y == 264 && MenuLayout.Upgrade[0].Height == 316, "vertical upgrade card geometry", report, ref pass, ref failed);
+        Check(MenuLayout.Upgrade[0].Right + 4 <= MenuLayout.Upgrade[1].X && MenuLayout.Upgrade[1].Right + 4 <= MenuLayout.Upgrade[2].X, "upgrade cards separated", report, ref pass, ref failed);
+        Check(MenuLayout.Upgrade[2].Bottom <= 670 && MenuLayout.Upgrade[2].Right <= Game.Width, "upgrade cards inside canvas", report, ref pass, ref failed);
+        Check(28 + (Campaign.Upgrades.Length - 1) * 40 + 36 <= 411, "hud relic strip fits", report, ref pass, ref failed);
+        Check(12 + 12 * 2 <= 48, "ledger sigil clears divider", report, ref pass, ref failed);
 
         Game game = new Game();
         Check(game.State == Stage.Title, "initial title", report, ref pass, ref failed);
@@ -130,9 +135,18 @@ public static class SelfTest
         shot.Input.Fire = false;
         Check(shot.Kills == 1 && shot.Enemies.Count == 0, "shooting kills enemy", report, ref pass, ref failed);
         Check(shot.Chain == 1 && shot.BestChain == 1 && shot.Health == 83, "chain heal and score", report, ref pass, ref failed);
+        Check(shot.ClearPulse > 0, "clear pulse starts", report, ref pass, ref failed);
+        float clearHealth = shot.Health;
+        shot.Invulnerable = 0;
+        shot.Hurt(25);
+        Check(shot.Health == clearHealth, "clear blocks damage", report, ref pass, ref failed);
+        shot.Bullets.Add(new Bullet { P = new V(640, 340), Velocity = new V(0, 0), Life = 10, Hostile = true, Damage = 99, Kind = 0 });
+        Steps(shot, 1);
+        Check(!shot.Bullets.Exists(b => b.Hostile), "clear purges hostile bullets", report, ref pass, ref failed);
         Steps(shot, 600);
         Check(shot.Chain == 0, "chain expires", report, ref pass, ref failed);
         Check(shot.ExitOpen, "room clear opens gate", report, ref pass, ref failed);
+        Check(shot.ClearPulse == 0, "clear pulse decays", report, ref pass, ref failed);
 
         Game flask = Fresh();
         flask.Pending = 0;
@@ -152,6 +166,29 @@ public static class SelfTest
         Steps(hazard, 5);
         Check(hazard.Health < hazardHealth, "spike hazard damages player", report, ref pass, ref failed);
         Check(hazard.Hazards.Count == 3, "cloister hazard layout", report, ref pass, ref failed);
+
+        Game clearedHazards = Fresh();
+        clearedHazards.Room = 1;
+        clearedHazards.EnterRoom();
+        clearedHazards.ContinueStory();
+        clearedHazards.Invulnerable = 100000;
+        int clearedFrames = 0;
+        while (!clearedHazards.ExitOpen && clearedFrames++ < 14000)
+        {
+            KillAll(clearedHazards);
+            clearedHazards.Step(Dt);
+        }
+        Check(clearedHazards.ExitOpen, "hazard room clears", report, ref pass, ref failed);
+        Check(clearedHazards.Hazards.Count == 0, "clear purges hazards", report, ref pass, ref failed);
+        Check(!clearedHazards.Bullets.Exists(b => b.Hostile), "clear purges hostile bullets in hazard room", report, ref pass, ref failed);
+        float clearedHealth = clearedHazards.Health;
+        clearedHazards.Invulnerable = 0;
+        clearedHazards.Hurt(99);
+        Check(clearedHazards.Health == clearedHealth, "clear blocks direct damage", report, ref pass, ref failed);
+        clearedHazards.Bullets.Add(new Bullet { P = new V(640, 340), Velocity = new V(0, 0), Life = 10, Hostile = true, Damage = 99, Kind = 0 });
+        Steps(clearedHazards, 1);
+        Check(!clearedHazards.Bullets.Exists(b => b.Hostile), "late hostile bullet is purged after clear", report, ref pass, ref failed);
+        Check(clearedHazards.Health == clearedHealth, "clear blocks bullet damage", report, ref pass, ref failed);
 
         for (int kind = 0; kind < 3; kind++)
         {
@@ -485,6 +522,13 @@ public static class SelfTest
                 campaign.Step(Dt);
             }
             Check(campaign.ExitOpen, "combat clears room " + room, report, ref pass, ref failed);
+            Check(campaign.Hazards.Count == 0, "clear purges hazards in room " + room, report, ref pass, ref failed);
+            Check(!campaign.Bullets.Exists(b => b.Hostile), "clear purges hostile bullets in room " + room, report, ref pass, ref failed);
+            Check(campaign.ClearPulse > 0, "clear pulse in room " + room, report, ref pass, ref failed);
+            float guardedHealth = campaign.Health;
+            campaign.Invulnerable = 0;
+            campaign.Hurt(99);
+            Check(campaign.Health == guardedHealth, "clear blocks damage in room " + room, report, ref pass, ref failed);
             campaign.Input.Fire = false;
             campaign.Player = new V(1190, Game.Floor - 24);
             campaign.Input.Use = true;
@@ -563,7 +607,17 @@ public static class SelfTest
         }
         Check(effectsFinite, "effect samples finite", report, ref pass, ref failed);
 
-        Check(ArtData.Maps[(int)RelicKind.Damage].Length > 0, "sprite map available", report, ref pass, ref failed);
+        bool spriteMapsFit = ArtData.Maps[(int)RelicKind.Damage].Length > 0 && ArtData.RelicMaps.Length == (int)RelicKind.None;
+        for (int i = 0; i < Campaign.Upgrades.Length; i++)
+        {
+            string[] map = ArtData.RelicMaps[(int)Campaign.Upgrades[i].Kind];
+            if (map.Length != 16) spriteMapsFit = false;
+            for (int row = 0; row < map.Length; row++)
+            {
+                if (map[row].Length != 12) spriteMapsFit = false;
+            }
+        }
+        Check(spriteMapsFit, "sprite maps available", report, ref pass, ref failed);
 
         bool storyFits = true;
         for (int i = 0; i < Campaign.Scenes.Length; i++)
@@ -573,8 +627,8 @@ public static class SelfTest
             for (int j = 0; j < lines.Length; j++)
             {
                 float width = ApproxTextWidth(lines[j], 17);
-                if (width > 724) storyFits = false;
-                visualLines += Math.Max(1, (int)Math.Ceiling(width / 724));
+                if (width > 684) storyFits = false;
+                visualLines += Math.Max(1, (int)Math.Ceiling(width / 684));
             }
             if (visualLines * 22 >= 240) storyFits = false;
         }
@@ -589,10 +643,13 @@ public static class SelfTest
         for (int i = 0; i < Campaign.Upgrades.Length; i++)
         {
             UpgradeDef def = Campaign.Upgrades[i];
-            if (86 + ApproxTextWidth(def.Name, 24) + 18 > MenuLayout.Upgrade[0].Width) relicCardsFit = false;
-            if (86 + ApproxTextWidth(def.Detail, 16) + 18 > MenuLayout.Upgrade[0].Width) relicCardsFit = false;
-            if (68 + ApproxTextWidth(def.Name, 17) + 18 > 270) abilityCardsFit = false;
-            if (18 + ApproxTextWidth(def.Detail, 14) + 18 > 270) abilityCardsFit = false;
+            float relicWidth = MenuLayout.Upgrade[0].Width;
+            if (14 + ApproxTextWidth(def.Name, 18) + 14 > relicWidth) relicCardsFit = false;
+            int relicLines = Math.Max(1, (int)Math.Ceiling(ApproxTextWidth(def.Detail, 14) / (relicWidth - 28)));
+            if (178 + relicLines * 20 > MenuLayout.Upgrade[0].Height - 8) relicCardsFit = false;
+            if (84 + ApproxTextWidth(def.Name, 17) + 8 > 270) abilityCardsFit = false;
+            int abilityLines = Math.Max(1, (int)Math.Ceiling(ApproxTextWidth(def.Detail, 13) / (270 - 64)));
+            if (44 + abilityLines * 18 > 98 - 8) abilityCardsFit = false;
             string label = RelicText(def, 1, true);
             string owned = RelicText(def, def.MaxStacks, false);
             if (def.Stackable)
@@ -606,10 +663,9 @@ public static class SelfTest
                 if (label != "") stackLabelsFit = false;
                 if (owned != "OWNED") stackLabelsFit = false;
             }
-            if (18 + ApproxTextWidth(label, 13) + 18 > MenuLayout.Upgrade[0].Width) stackLabelsFit = false;
-            if (14 + ApproxTextWidth(label, 12) + 14 > 270) stackLabelsFit = false;
-            if (18 + ApproxTextWidth(owned, 13) + 18 > MenuLayout.Upgrade[0].Width) stackLabelsFit = false;
-            if (14 + ApproxTextWidth(owned, 12) + 14 > 270) stackLabelsFit = false;
+            string badge = def.MaxStacks < 99 ? "MAXED" : "x" + def.MaxStacks;
+            if (10 + ApproxTextWidth(badge, 11) + 10 > relicWidth) stackLabelsFit = false;
+            if (8 + ApproxTextWidth(badge, 11) + 8 > 270) stackLabelsFit = false;
         }
         Check(relicCardsFit, "relic cards fit", report, ref pass, ref failed);
         Check(abilityCardsFit, "ability cards fit", report, ref pass, ref failed);

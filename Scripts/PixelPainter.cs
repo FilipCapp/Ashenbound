@@ -84,7 +84,9 @@ public partial class PixelPainter : Control
 
     void Text(string text, float x, float y, float size, Color c)
     {
-        DrawString(null, new Vector2(x, y), text, HorizontalAlignment.Left, -1, (int)size, c);
+        Font drawFont = ThemeDB.FallbackFont;
+        float ascent = drawFont != null ? drawFont.GetAscent((int)size) : size;
+        DrawString(drawFont, new Vector2(x, y + ascent), text, HorizontalAlignment.Left, -1, (int)size, c);
     }
 
     void Background(int room)
@@ -236,6 +238,15 @@ public partial class PixelPainter : Control
         {
             Color c = ArtData.C(particle.Color);
             R(particle.P.X + shakeX, particle.P.Y + shakeY, 4, 4, A(c, (int)(255 * Game.Clamp(particle.Life / particle.Max, 0, 1))));
+        }
+
+        if (game.ClearPulse > 0)
+        {
+            float clear = Game.Clamp(game.ClearPulse / Game.ClearPulseDuration, 0, 1);
+            Color clearColor = A(Cyan, (int)(90 * clear));
+            R(0, 80, Game.Width, Game.Height - 80, A(Cyan, (int)(18 * clear)));
+            if (reduceMotion) R(0, 80, Game.Width, Game.Height - 80, clearColor);
+            else Circle(Game.Width / 2 + shakeX, 360 + shakeY, 60 + (1 - clear) * 620, clearColor, false, 6);
         }
 
         if (game.Invulnerable <= 0 || (int)(clock * 24) % 2 == 0)

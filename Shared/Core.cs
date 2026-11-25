@@ -20,9 +20,10 @@ public struct V {
    };
   public static readonly RectangleF[] Story={new RectangleF(760,586,270,54)};
    public static readonly RectangleF[] Epilogue={new RectangleF(450,604,380,50)};
-  public static readonly RectangleF[] Upgrade={
-   new RectangleF(250,270,780,96),new RectangleF(250,382,780,96),new RectangleF(250,494,780,96)
-  };
+   public static readonly RectangleF[] Upgrade={
+    new RectangleF(286,264,216,316),new RectangleF(532,264,216,316),new RectangleF(778,264,216,316)
+   };
+
   public static readonly RectangleF[] Pause={
    new RectangleF(430,292,420,58),new RectangleF(430,356,420,58),
    new RectangleF(430,420,420,58),new RectangleF(430,484,420,58)

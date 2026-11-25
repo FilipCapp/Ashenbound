@@ -3,8 +3,4 @@
     <TargetFramework>net8.0</TargetFramework>
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>
-  <ItemGroup>
-    <Compile Include="../src/Core.cs" Link="Core.cs" />
-    <Compile Include="../src/Game.cs" Link="Game.cs" />
-  </ItemGroup>
 </Project>

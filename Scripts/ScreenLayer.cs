@@ -22,6 +22,10 @@ public partial class ScreenLayer : Control
     static readonly Color Cyan = ArtData.C(Palette.Cyan);
     static readonly Color Ink = ArtData.C(Palette.Ink);
     static readonly Color Muted = ArtData.C(Palette.Muted);
+    static readonly Color Paper = C(228, 215, 184);
+    static readonly Color PaperShade = C(196, 178, 143);
+    static readonly Color PaperInk = C(38, 31, 27);
+    static readonly Color Wax = C(176, 52, 68);
 
     public override void _Ready()
     {
@@ -101,6 +105,57 @@ public partial class ScreenLayer : Control
         return ArtData.C(Campaign.Accent(room));
     }
 
+    void PaperSurface(RectangleF r, bool active, int seed)
+    {
+        Box(r.X + 3, r.Y + 4, r.Width - 6, r.Height - 6, A(Ink, 190));
+        Box(r.X, r.Y + 2, r.Width, r.Height - 4, PaperShade);
+        Box(r.X + 3, r.Y, r.Width - 6, r.Height, Paper);
+        Box(r.X + 3, r.Y, r.Width - 6, 2, active ? Gold : A(Gold, 150));
+        Box(r.X + 3, r.Bottom - 2, r.Width - 6, 2, A(Wax, active ? 190 : 110));
+        Box(r.X, r.Y + 3, 2, r.Height - 6, A(Gold, active ? 220 : 150));
+        Box(r.Right - 2, r.Y + 3, 2, r.Height - 6, A(Gold, active ? 180 : 120));
+        Box(r.X + 8, r.Y + 8, r.Width - 16, 1, A(PaperInk, 42));
+        Box(r.X + 8, r.Bottom - 9, r.Width - 16, 1, A(PaperInk, 32));
+        Grain(r.X + 6, r.Y + 6, r.Width - 12, r.Height - 12, active ? 34 : 22, seed);
+    }
+
+    void WaxSeal(float x, float y, float r, int seed)
+    {
+        Circle(x, y, r, A(Ink, 90));
+        Circle(x, y, r - 1, Wax);
+        Circle(x, y, r - 4, Blood);
+        Line(x - r * 0.55f, y, x + r * 0.55f, y, A(Gold, 190), 1);
+        Line(x, y - r * 0.55f, x, y + r * 0.55f, A(Gold, 190), 1);
+        Box(x - 1, y - 1, 2, 2, Gold);
+        if (seed % 2 == 0) Line(x - r * 0.4f, y - r * 0.4f, x + r * 0.4f, y + r * 0.4f, A(Ink, 80), 1);
+    }
+
+    void RelicSigil(RelicKind kind, float x, float y, int scale)
+    {
+        if (kind == RelicKind.None || (int)kind >= ArtData.RelicMaps.Length) return;
+        string[] map = ArtData.RelicMaps[(int)kind];
+        for (int row = 0; row < map.Length; row++)
+        {
+            for (int col = 0; col < map[row].Length; col++)
+            {
+                Color c = ArtData.PixelColor(map[row][col]);
+                if (c.A <= 0) continue;
+                Box(x + col * scale, y + row * scale, scale, scale, c);
+            }
+        }
+    }
+
+    void StackBadge(float x, float y, string label, bool active)
+    {
+        if (string.IsNullOrEmpty(label)) return;
+        float w = ApproxWidth(label, 11, false) + 12;
+        float h = 18;
+        Box(x - w, y - h, w, h, A(Ink, 230));
+        Box(x - w, y - h, w, 2, active ? Gold : A(Gold, 140));
+        Box(x - w, y - 1, w, 1, A(Wax, 190));
+        Text(label, x - w + 6, y - h + 3, 11, active ? Gold : Paper);
+    }
+
     void Box(float x, float y, float w, float h, Color c)
     {
         if (w <= 0 || h <= 0) return;
@@ -120,7 +175,9 @@ public partial class ScreenLayer : Control
 
     void Text(string text, float x, float y, float size, Color c)
     {
-        DrawString(Font, new Vector2(x, y), text ?? "", HorizontalAlignment.Left, -1, (int)size, c);
+        Font drawFont = Font ?? ThemeDB.FallbackFont;
+        float ascent = drawFont != null ? drawFont.GetAscent((int)size) : size;
+        DrawString(drawFont, new Vector2(x, y + ascent), text ?? "", HorizontalAlignment.Left, -1, (int)size, c);
     }
 
     void Bold(string text, float x, float y, float size, Color c)
@@ -201,28 +258,23 @@ public partial class ScreenLayer : Control
 
     void Panel(RectangleF r, bool active, int seed)
     {
-        Box(r.X, r.Y, r.Width, r.Height, C(active ? 52 : 20, 9, 9, 18));
-        Box(r.X + 3, r.Y + 3, r.Width - 6, r.Height - 6, C(active ? 38 : 16, 20, 20, 32));
-        Box(r.X, r.Y, r.Width, 2, active ? Gold : C(255, 139, 74, 92));
-        Box(r.X, r.Bottom - 2, r.Width, 2, C(255, 139, 74, active ? 130 : 70));
-        Box(r.X, r.Y, 2, r.Height, C(255, 205, 116, active ? 150 : 80));
-        Box(r.Right - 2, r.Y, 2, r.Height, C(255, 139, 74, active ? 110 : 60));
-        Grain(r.X + 6, r.Y + 6, r.Width - 12, r.Height - 12, 18, seed);
+        PaperSurface(r, active, seed);
     }
 
     void Frame(float x, float y, float w, float h, Color edge)
     {
-        Box(x, y, w, h, C(8, 8, 16, 238));
+        Box(x, y, w, h, C(8, 8, 16, 242));
+        Box(x + 5, y + 5, w - 10, h - 10, A(PaperShade, 24));
         Box(x, y, w, 2, edge);
-        Box(x, y + h - 2, w, 2, A(edge, 90));
+        Box(x, y + h - 2, w, 2, A(edge, 110));
         Box(x, y, 2, h, edge);
-        Box(x + w - 2, y, 2, h, A(edge, 90));
-        Box(x, y, 20, 2, Gold);
-        Box(x, y, 2, 20, Gold);
-        Box(x + w - 20, y + h - 2, 20, 2, Gold);
-        Box(x + w - 2, y + h - 20, 2, 20, Gold);
-        Box(x + 7, y + 7, w - 14, 1, C(255, 205, 116, 28));
-        Box(x + 7, y + h - 8, w - 14, 1, C(255, 139, 74, 24));
+        Box(x + w - 2, y, 2, h, A(edge, 110));
+        Box(x, y, 28, 2, Gold);
+        Box(x, y, 2, 28, Gold);
+        Box(x + w - 28, y + h - 2, 28, 2, Gold);
+        Box(x + w - 2, y + h - 28, 2, 28, Gold);
+        Box(x + 7, y + 7, w - 14, 1, A(Gold, 55));
+        Box(x + 7, y + h - 8, w - 14, 1, A(Wax, 90));
         Grain(x + 9, y + 9, w - 18, h - 18, 42, (int)x + (int)y);
     }
 
@@ -240,7 +292,8 @@ public partial class ScreenLayer : Control
 
     void Sigil(float x, float y)
     {
-        Circle(x, y, 40, C(255, 139, 74, 70), false, 2);
+        Circle(x, y, 46, A(Wax, 70));
+        Circle(x, y, 40, A(Gold, 110), false, 2);
         Circle(x, y, 26, Gold, false, 2);
         Line(x, y - 32, x, y + 32, Ember, 2);
         Line(x - 23, y + 19, x, y - 27, Ember, 2);
@@ -250,10 +303,11 @@ public partial class ScreenLayer : Control
 
     void Header(string kicker, string title, string sub, float x, float y)
     {
-        Text(kicker, x, y, 15, Ember);
-        Bold(title, x, y + 24, 44, new Color(1, 1, 1));
-        Text(sub, x, y + 78, 18, C(204, 208, 198));
-        Box(x, y + 108, 560, 2, C(255, 139, 74, 90));
+        Text(kicker, x, y, 15, Gold);
+        Bold(title, x, y + 24, 44, Paper);
+        Text(sub, x, y + 78, 18, PaperShade);
+        Box(x, y + 108, 560, 2, A(Gold, 190));
+        Box(x, y + 110, 180, 1, A(Wax, 180));
     }
 
     void MenuItemVisual(string label, string hint, RectangleF r, int index)
@@ -261,18 +315,18 @@ public partial class ScreenLayer : Control
         bool hover = r.Contains(game.Input.Aim.X, game.Input.Aim.Y);
         bool active = hover || game.Menu == index;
         Panel(r, active, index + 3);
-        Box(r.X + 8, r.Y + 8, 10, r.Height - 16, active ? Gold : C(255, 139, 74, 90));
-        Box(r.X + 11, r.Y + r.Height / 2 - 5, 4, 4, active ? new Color(1, 1, 1) : Ember);
-        Box(r.X + 24, r.Bottom - 9, r.Width - 48, 1, C(255, 139, 74, active ? 90 : 40));
+        Box(r.X + 8, r.Y + 8, 10, r.Height - 16, active ? Wax : A(PaperInk, 70));
+        Box(r.X + 11, r.Y + r.Height / 2 - 5, 4, 4, active ? Gold : A(PaperInk, 150));
+        Box(r.X + 24, r.Bottom - 9, r.Width - 48, 1, A(PaperInk, active ? 110 : 60));
         string shown = (active ? "> " : "  ") + label;
         float labelX = r.X + 32;
-        Bold(shown, labelX, r.Y + 12, 21, active ? new Color(1, 1, 1) : Ash);
+        Bold(shown, labelX, r.Y + 12, 21, active ? PaperInk : A(PaperInk, 220));
         if (hint.Length > 0)
         {
             float hintX = r.Right - 18 - ApproxWidth(hint, 14, false);
             if (hintX >= labelX + ApproxWidth(shown, 21, true) + 12)
             {
-                Text(hint, hintX, r.Y + 16, 14, active ? Gold : Muted);
+                Text(hint, hintX, r.Y + 16, 14, active ? Wax : A(PaperInk, 150));
             }
         }
     }
@@ -283,17 +337,17 @@ public partial class ScreenLayer : Control
         bool active = enabled && (hover || game.Menu == index);
         bool compact = r.Height < 72;
         Panel(r, active, index + 13);
-        Box(r.X + 8, r.Y + 8, 8, r.Height - 16, active ? Gold : Ember);
-        Box(r.X + 72, r.Y + 10, 1, r.Height - 20, C(255, 205, 116, 50));
+        Box(r.X + 8, r.Y + 8, 8, r.Height - 16, active ? Wax : A(PaperInk, 100));
+        Box(r.X + 72, r.Y + 10, 1, r.Height - 20, A(PaperInk, 80));
         float keySize = compact ? 25 : 32;
         float titleSize = compact ? 21 : 24;
         float detailSize = compact ? 13 : 16;
         float keyY = compact ? r.Y + 13 : r.Y + 29;
         float titleY = compact ? r.Y + 13 : r.Y + 19;
         float detailY = compact ? r.Y + 37 : r.Y + 58;
-        Bold(key, r.X + 24, keyY, keySize, active ? Gold : Muted);
-        Bold(title, r.X + 86, titleY, titleSize, active ? new Color(1, 1, 1) : Ash);
-        Text(detail, r.X + 86, detailY, detailSize, active ? C(255, 205, 116, 220) : Muted);
+        Bold(key, r.X + 24, keyY, keySize, active ? Wax : A(PaperInk, 170));
+        Bold(title, r.X + 86, titleY, titleSize, active ? PaperInk : A(PaperInk, 220));
+        Text(detail, r.X + 86, detailY, detailSize, active ? A(PaperInk, 235) : A(PaperInk, 160));
         if (meta.Length > 0)
         {
             float metaSize = compact ? 12 : 13;
@@ -301,7 +355,7 @@ public partial class ScreenLayer : Control
             float titleEnd = r.X + 86 + ApproxWidth(title, titleSize, true);
             if (metaX >= titleEnd + 12)
             {
-                Text(meta, metaX, compact ? r.Y + 8 : r.Y + 16, metaSize, enabled ? (active ? Gold : C(255, 205, 116, 180)) : Muted);
+                Text(meta, metaX, compact ? r.Y + 8 : r.Y + 16, metaSize, enabled ? (active ? Wax : A(PaperInk, 180)) : A(PaperInk, 120));
             }
         }
         if (active)
@@ -310,21 +364,55 @@ public partial class ScreenLayer : Control
             float badgeY = compact ? r.Y + 39 : r.Y + 64;
             if (badgeX >= r.X + 86 + ApproxWidth(detail, detailSize, false) + 12)
             {
-                Text("SELECTED", badgeX, badgeY, 14, Gold);
+                Text("SELECTED", badgeX, badgeY, 14, Wax);
             }
         }
     }
 
+    void PlayingCard(RectangleF r, bool active, int index, UpgradeDef def, RelicKind kind, int stack)
+    {
+        PaperSurface(r, active, index + 21);
+        WaxSeal(r.X + 20, r.Y + 20, 11, index);
+        Bold((index + 1).ToString("00"), r.X + 13, r.Y + 10, 12, Paper);
+        if (def == null)
+        {
+            TextWrap("ALL RELICS\nCLAIMED", r.X + 16, r.Y + 216, r.Width - 32, 18, 26, PaperInk);
+            return;
+        }
+        RelicSigil(kind, r.X + r.Width / 2 - 24, r.Y + 54, 4);
+        Box(r.X + 16, r.Y + 132, r.Width - 32, 2, A(Gold, 190));
+        Bold(def.Name, r.X + 14, r.Y + 146, 18, PaperInk);
+        TextWrap(def.Detail, r.X + 14, r.Y + 178, r.Width - 28, 14, 20, A(PaperInk, 235));
+        string label = RelicLabel(def, stack, true);
+        if (def.MaxStacks < 99 && stack >= def.MaxStacks) label = "MAXED";
+        StackBadge(r.Right - 10, r.Bottom - 10, label, active);
+    }
+
+    void LedgerMiniCard(RectangleF r, bool active, int index, UpgradeDef def)
+    {
+        PaperSurface(r, active, index + 41);
+        RelicSigil(def.Kind, r.X + 12, r.Y + 16, 2);
+        Box(r.X + 48, r.Y + 12, 1, r.Height - 24, A(PaperInk, 80));
+        Bold((index + 1).ToString("00"), r.X + 52, r.Y + 12, 13, Wax);
+        Bold(def.Name, r.X + 84, r.Y + 12, 17, PaperInk);
+        TextWrap(def.Detail, r.X + 52, r.Y + 44, r.Width - 64, 13, 18, A(PaperInk, 235));
+        int stack = game.OwnedStacks(def.Kind);
+        string label = stack > 0 ? "x" + stack : "";
+        StackBadge(r.Right - 8, r.Bottom - 8, label, active);
+    }
+
     void ContextFooter(string message)
     {
-        Box(0, 670, Game.Width, 50, Ink);
-        Text(message, 28, 678, 14, Muted);
+        Box(0, 670, Game.Width, 50, PaperShade);
+        Box(0, 670, Game.Width, 2, Gold);
+        Box(0, 718, Game.Width, 2, A(Wax, 190));
+        Text(message, 28, 678, 14, PaperInk);
     }
 
     void Guide(string key, string value, float x, float y)
     {
-        Bold(key, x, y, 15, Gold);
-        Text(value, x + 112, y, 15, Ash);
+        Bold(key, x, y, 15, Wax);
+        Text(value, x + 112, y, 15, PaperInk);
     }
 
     public override void _Draw()
@@ -352,19 +440,19 @@ public partial class ScreenLayer : Control
         Box(0, 0, Game.Width, Game.Height, C(6, 6, 14, 84));
         Sparks(0, 40, 1280, 620);
         Frame(58, 54, 600, 590, Ember);
-        Text("AN ORIGINAL DARK FANTASY RUN-AND-GUN", 88, 88, 15, Ember);
+        Text("AN ORIGINAL DARK FANTASY RUN-AND-GUN", 88, 88, 15, Gold);
         Sigil(556, 112);
-        Bold("ASHENBOUND", 86, 150, 68, new Color(1, 1, 1));
+        Bold("ASHENBOUND", 86, 150, 68, Paper);
         Bold("THE LAST CINDER", 88, 226, 48, Ember);
-        Box(90, 300, 520, 2, C(255, 139, 74, 110));
-        Text("THE SUN HAS BEEN DEAD FOR THREE WINTERS.", 90, 324, 19, Gold);
-        TextWrap("Carry the Last Cinder through three ruined sanctums. Break the Cinder Bishop's choir. Give the world one more dawn.", 90, 360, 520, 17, 24, C(204, 208, 200));
+        Box(90, 300, 520, 2, A(Gold, 190));
+        Text("THE SUN HAS BEEN DEAD FOR THREE WINTERS.", 90, 324, 19, Paper);
+        TextWrap("Carry the Last Cinder through three ruined sanctums. Break the Cinder Bishop's choir. Give the world one more dawn.", 90, 360, 520, 17, 24, PaperShade);
         PixelPainter.DrawSprite(this, 0, new V(360, 548), 3, false, 0);
         float titleStep = 4 * 3;
         V titleHand = new V(360, 548) + new V(28 * 3, -12 * 3);
         Box(Mathf.Floor(titleHand.X / titleStep) * titleStep, Mathf.Floor(titleHand.Y / titleStep) * titleStep, 16 * 3, 4 * 3, Gold);
         Box(58, 600, 600, 3, Ember);
-        Text("VEYRA / EMBER BEARER", 88, 612, 16, Muted);
+        Text("VEYRA / EMBER BEARER", 88, 612, 16, PaperShade);
         Frame(700, 160, 510, 470, Gold);
         Text("MENU", 740, 190, 16, Gold);
         RectangleF[] items = MenuLayout.Title;
@@ -378,32 +466,49 @@ public partial class ScreenLayer : Control
 
     void DrawHud()
     {
-        Box(0, 0, Game.Width, 88, C(9, 10, 20, 245));
+        Box(0, 0, Game.Width, 88, A(Ink, 245));
+        Box(0, 86, Game.Width, 2, A(Gold, 190));
+        PaperSurface(new RectangleF(18, 8, 360, 72), false, 3);
         Text("ASHENBOUND", 28, 16, 17, Ember);
-        Box(28, 50, 230, 11, C(34, 45, 65));
+        Box(28, 50, 230, 11, A(PaperInk, 80));
         Box(28, 50, 230 * game.Health / game.MaxHealth, 11, Blood);
-        Text(((int)game.Health) + " / " + (int)game.MaxHealth, 274, 44, 16, new Color(1, 1, 1));
-        Text("SANCTUM " + (game.Room + 1) + " / " + Campaign.TotalRooms + "  -  " + Campaign.Names[game.Room], 411, 15, 17, new Color(1, 1, 1));
-        Text(game.ExitOpen ? "SANCTUM CLEAR / GATE OPEN ON THE RIGHT" : "HOSTILES  " + (game.Enemies.Count + game.Pending), 434, 49, 14, game.ExitOpen ? Cyan : Muted);
+        Text(((int)game.Health) + " / " + (int)game.MaxHealth, 274, 44, 16, PaperInk);
+        Text("SANCTUM " + (game.Room + 1) + " / " + Campaign.TotalRooms + "  -  " + Campaign.Names[game.Room], 411, 15, 17, Paper);
+        Text(game.ExitOpen ? "SANCTUM CLEAR / GATE OPEN ON THE RIGHT" : "HOSTILES  " + (game.Enemies.Count + game.Pending), 434, 49, 14, game.ExitOpen ? Cyan : PaperShade);
         Bold(game.Score.ToString("D6"), 1080, 11, 29, Gold);
         Text(game.DashCooldown <= 0 ? "DASH READY" : "DASH  " + game.DashCooldown.ToString("0.0"), 1090, 51, 14, Ember);
-        Text("FLASKS " + game.Flasks, 28, 92, 14, Gold);
+        Text("FLASKS " + game.Flasks, 900, 51, 14, Gold);
+        int shown = 0;
+        for (int i = 0; i < Campaign.Upgrades.Length; i++)
+        {
+            UpgradeDef def = Campaign.Upgrades[i];
+            int stack = game.OwnedStacks(def.Kind);
+            if (stack <= 0) continue;
+            RectangleF mini = new RectangleF(28 + shown * 40, 92, 36, 38);
+            PaperSurface(mini, false, 70 + i);
+            RelicSigil(def.Kind, mini.X + 6, mini.Y + 3, 2);
+            StackBadge(mini.Right - 3, mini.Bottom - 3, "x" + stack, true);
+            shown++;
+        }
         if (game.Chain > 0)
         {
-            Bold(game.Chain + " x CHAIN" + (game.Overcharged ? " / OVERCHARGE" : ""), 30, 112, 27, game.Overcharged ? Gold : Ash);
-            Box(32, 154, 190 * Game.Clamp(game.ChainTime / 4.2f, 0, 1), 4, game.Overcharged ? Gold : Ember);
+            Bold(game.Chain + " x CHAIN" + (game.Overcharged ? " / OVERCHARGE" : ""), 28, 134, 27, game.Overcharged ? Gold : Paper);
+            Box(30, 166, 190 * Game.Clamp(game.ChainTime / 4.2f, 0, 1), 4, game.Overcharged ? Gold : Ember);
         }
         if (game.ToastTime > 0 && game.Room < 2) Text(game.Toast, 410, 103, 16, Cyan);
         foreach (Enemy enemy in game.Enemies)
         {
             if (enemy.Kind != 3) continue;
-            Text(Campaign.Boss + (enemy.Hp < enemy.MaxHp * .34f ? " / ENRAGED" : enemy.Hp < enemy.MaxHp * .67f ? " / CHOIR" : ""), 410, 105, 18, Gold);
-            Box(350, 133, 580, 8, C(68, 36, 48));
-            Box(350, 133, 580 * Mathf.Max(0, enemy.Hp / enemy.MaxHp), 8, Accent(game.Room));
+            PaperSurface(new RectangleF(350, 103, 580, 38), false, 71);
+            Text(Campaign.Boss + (enemy.Hp < enemy.MaxHp * .34f ? " / ENRAGED" : enemy.Hp < enemy.MaxHp * .67f ? " / CHOIR" : ""), 364, 107, 18, PaperInk);
+            Box(364, 133, 552, 6, A(PaperInk, 90));
+            Box(364, 133, 552 * Mathf.Max(0, enemy.Hp / enemy.MaxHp), 6, Accent(game.Room));
         }
-        Box(0, 670, Game.Width, 50, Ink);
-        Text("A/D MOVE  SPACE JUMP  MOUSE AIM + FIRE  SHIFT/RMB DASH  Q FLASK  E GATE  S DROP", 28, 678, 13, Muted);
-        TextRight("ESC PAUSE  M SOUND  F11", 1252, 678, 13, Muted);
+        Box(0, 670, Game.Width, 50, PaperShade);
+        Box(0, 670, Game.Width, 2, Gold);
+        Box(0, 718, Game.Width, 2, A(Wax, 190));
+        Text("A/D MOVE  SPACE JUMP  MOUSE AIM + FIRE  SHIFT/RMB DASH  Q FLASK  E GATE  S DROP", 28, 678, 13, PaperInk);
+        TextRight("ESC PAUSE  M SOUND  F11", 1252, 678, 13, PaperInk);
     }
 
     void DrawStory()
@@ -417,7 +522,8 @@ public partial class ScreenLayer : Control
         Frame(248, 124, 784, 526, Gold);
         Header("SANCTUM " + (game.Room + 1) + " / " + Campaign.TotalRooms, "THE LAST CINDER", Campaign.Speakers[Mathf.Min(game.Room, 3)], 294, 152);
         Sparks(248, 300, 784, 260);
-        TextWrap(Campaign.Scenes[Mathf.Min(game.Room, 3)], 298, 276, 724, 17, 24, C(214, 216, 220));
+        PaperSurface(new RectangleF(274, 250, 732, 270), false, 11);
+        TextWrap(Campaign.Scenes[Mathf.Min(game.Room, 3)], 298, 276, 684, 17, 24, PaperInk);
         MenuItemVisual("CONTINUE", "ENTER", MenuLayout.Story[0], 0);
         ContextFooter("ENTER / CLICK TO CONTINUE   J REOPENS THE PAGE IN PLAY");
     }
@@ -437,12 +543,13 @@ public partial class ScreenLayer : Control
             float y = 356 - Mathf.Sin(i / 8f * Mathf.Pi) * 34;
             Box(x, y, 3, 44 - (int)(i / 3f) * 8, C(255, 205, 116, 180 - i * 12));
         }
-        Bold("THE BISHOP BREAKS", 270, 398, 19, Gold);
-        TextWrap("A dried host. A silenced choir. The long dusk loses its voice.", 270, 430, 220, 15, 22, Ash);
-        Bold("THE CINDER FLIES", 530, 398, 19, Gold);
-        TextWrap("It rises through the vaulted dark and takes flight beyond the nave.", 530, 430, 220, 15, 22, Ash);
-        Bold("ONE MORE MORNING", 790, 398, 19, Gold);
-        TextWrap("First a red line, then a river. Veyra carries the rest.", 790, 430, 220, 15, 22, Ash);
+        PaperSurface(new RectangleF(250, 380, 780, 142), false, 12);
+        Bold("THE BISHOP BREAKS", 270, 398, 19, Wax);
+        TextWrap("A dried host. A silenced choir. The long dusk loses its voice.", 270, 430, 220, 15, 22, PaperInk);
+        Bold("THE CINDER FLIES", 530, 398, 19, Wax);
+        TextWrap("It rises through the vaulted dark and takes flight beyond the nave.", 530, 430, 220, 15, 22, PaperInk);
+        Bold("ONE MORE MORNING", 790, 398, 19, Wax);
+        TextWrap("First a red line, then a river. Veyra carries the rest.", 790, 430, 220, 15, 22, PaperInk);
         MenuItemVisual("WITNESS THE DAWN", "ENTER", MenuLayout.Epilogue[0], 0);
         ContextFooter("ENTER / CLICK TO SEE THE VICTORY RECORD");
     }
@@ -456,12 +563,9 @@ public partial class ScreenLayer : Control
         {
             RelicKind kind = game.UpgradeChoices[i];
             UpgradeDef def = Campaign.UpgradeFor(kind);
-            if (def == null)
-            {
-                MenuCardVisual((i + 1).ToString(), "NO RELIC", "ALL RELICS CLAIMED", MenuLayout.Upgrade[i], i, "", false);
-                continue;
-            }
-            MenuCardVisual((i + 1).ToString(), def.Name, def.Detail, MenuLayout.Upgrade[i], i, RelicLabel(def, game.OwnedStacks(kind), true));
+            RectangleF card = MenuLayout.Upgrade[i];
+            bool active = game.Menu == i || card.Contains(game.Input.Aim.X, game.Input.Aim.Y);
+            PlayingCard(card, active, i, def, kind, game.OwnedStacks(kind));
         }
         ContextFooter("1/2/3 OR W/S + ENTER   SELECT A RELIC");
     }
@@ -484,20 +588,23 @@ public partial class ScreenLayer : Control
         Box(0, 88, Game.Width, 632, C(8, 8, 16, 238));
         Frame(220, 100, 840, 525, Cyan);
         Header("FIELD MANUAL", "HOW TO SURVIVE THE ASH", "Controls and cinder-lore for the bearer.", 266, 132);
-        Text("MOVEMENT", 266, 264, 16, Gold);
+        PaperSurface(new RectangleF(250, 250, 372, 168), false, 13);
+        PaperSurface(new RectangleF(634, 250, 390, 168), false, 14);
+        Text("MOVEMENT", 266, 264, 16, Wax);
         Guide("A / D", "MOVE", 266, 292);
         Guide("SPACE / W", "JUMP", 266, 320);
         Guide("S / DOWN", "DROP THROUGH LEDGES", 266, 348);
         Guide("SHIFT / RMB", "DASH WITH I-FRAMES", 266, 376);
-        Text("COMBAT", 650, 264, 16, Gold);
+        Text("COMBAT", 650, 264, 16, Wax);
         Guide("MOUSE", "AIM", 650, 292);
         Guide("LEFT CLICK", "FIRE", 650, 320);
         Guide("Q", "CINDER FLASK", 650, 348);
         Guide("E", "OPEN CLEARED GATE", 650, 376);
         Guide("J", "REOPEN SCENE", 650, 404);
-        Box(266, 430, 724, 2, C(255, 139, 74, 90));
-        Text("CINDER RULES", 266, 448, 16, Gold);
-        TextWrap("Chain kills quickly to overcharge the Trigger and heal on every takedown. Break every foe before the gate opens. Walls hold them inside the sanctum. Dashes ignore hits. Flasks explode on impact. Stay ahead of the Bishop's choir.", 266, 474, 724, 15, 22, Ash);
+        PaperSurface(new RectangleF(250, 432, 760, 116), false, 15);
+        Box(266, 430, 724, 2, A(PaperInk, 70));
+        Text("CINDER RULES", 266, 448, 16, Wax);
+        TextWrap("Chain kills quickly to overcharge the Trigger and heal on every takedown. Break every foe before the gate opens. Walls hold them inside the sanctum. Dashes ignore hits. Flasks explode on impact. Stay ahead of the Bishop's choir.", 266, 474, 724, 15, 22, PaperInk);
         MenuItemVisual("BACK", "ESC", MenuLayout.Help[0], 0);
         ContextFooter("ESC / ENTER TO RETURN");
     }
@@ -506,17 +613,17 @@ public partial class ScreenLayer : Control
     {
         bool active = game.Menu == index || r.Contains(game.Input.Aim.X, game.Input.Aim.Y);
         Panel(r, active, 60 + index);
-        Box(r.X + 8, r.Y + 8, 8, r.Height - 16, active ? Gold : Ember);
-        Bold(label, r.X + 28, r.Y + 14, 21, active ? new Color(1, 1, 1) : Ash);
+        Box(r.X + 8, r.Y + 8, 8, r.Height - 16, active ? Wax : A(PaperInk, 110));
+        Bold(label, r.X + 28, r.Y + 14, 21, active ? PaperInk : A(PaperInk, 220));
         float barX = r.X + 190;
         float barY = r.Y + 24;
         float barW = r.Width - 300;
-        Box(barX - 2, barY - 2, barW + 4, 14, C(255, 205, 116, active ? 70 : 40));
-        Box(barX, barY, barW, 10, C(34, 45, 65));
-        Box(barX, barY, barW * value, 10, active ? Gold : Ember);
-        Box(barX, barY, barW * value, 2, C(255, 205, 116, active ? 180 : 110));
-        for (int i = 0; i <= 10; i++) Box(barX + barW * i / 10 - 1, barY - 3, 2, 16, C(12, 12, 18, 70));
-        TextRight(Mathf.Round(value * 100) + "%", r.Right - 24, r.Y + 18, 17, active ? Gold : Muted);
+        Box(barX - 2, barY - 2, barW + 4, 14, A(Gold, active ? 90 : 55));
+        Box(barX, barY, barW, 10, A(PaperInk, 90));
+        Box(barX, barY, barW * value, 10, active ? Gold : Wax);
+        Box(barX, barY, barW * value, 2, A(Gold, active ? 230 : 150));
+        for (int i = 0; i <= 10; i++) Box(barX + barW * i / 10 - 1, barY - 3, 2, 16, A(PaperInk, 130));
+        TextRight(Mathf.Round(value * 100) + "%", r.Right - 24, r.Y + 18, 17, active ? Wax : A(PaperInk, 170));
     }
 
     void DrawAudio()
@@ -542,18 +649,8 @@ public partial class ScreenLayer : Control
             float y = 246 + (i / 3) * 114;
             RectangleF card = new RectangleF(x, y, 270, 98);
             UpgradeDef def = Campaign.Upgrades[i];
-            int stack = game.OwnedStacks(def.Kind);
             bool active = card.Contains(game.Input.Aim.X, game.Input.Aim.Y);
-            Panel(card, active, 40 + i);
-            Box(card.X + 54, card.Y + 10, 1, card.Height - 20, C(255, 205, 116, 50));
-            Bold((i + 1).ToString("00"), card.X + 16, card.Y + 20, 17, active ? Gold : Muted);
-            Bold(def.Name, card.X + 68, card.Y + 16, 17, active ? new Color(1, 1, 1) : Ash);
-            Text(def.Detail, card.X + 18, card.Y + 56, 14, active ? Gold : Muted);
-            string meta = RelicLabel(def, stack, false);
-            if (meta.Length > 0)
-            {
-                Text(meta, card.Right - 14 - ApproxWidth(meta, 12, false), card.Y + 77, 12, stack > 0 ? Gold : Muted);
-            }
+            LedgerMiniCard(card, active, i, def);
         }
         MenuItemVisual("BACK", "ESC", MenuLayout.Abilities[0], 0);
         ContextFooter("ESC / ENTER TO RETURN");
@@ -579,9 +676,9 @@ public partial class ScreenLayer : Control
         Box(0, 88, Game.Width, 632, C(8, 8, 16, 238));
         Frame(300, 160, 680, 410, won ? Gold : Blood);
         Header(won ? "VIGIL COMPLETE" : "VIGIL ENDED", won ? "DAWN RETURNS" : "THE DUSK KEEPS YOU", won ? "The Cinder takes flight. A thin red line becomes a river." : "The choir keeps the night. Another bearer will answer.", 346, 190);
-        Box(346, 310, 588, 76, C(20, 24, 28));
-        Bold("SCORE " + game.Score, 364, 322, 23, Gold);
-        Text("BEST CHAIN " + game.BestChain + "     SILENCED " + game.Kills + "     VIGIL " + (game.Seed & 65535).ToString("X4"), 364, 360, 17, Muted);
+        PaperSurface(new RectangleF(346, 310, 588, 76), false, 16);
+        Bold("SCORE " + game.Score, 364, 322, 23, Wax);
+        Text("BEST CHAIN " + game.BestChain + "     SILENCED " + game.Kills + "     VIGIL " + (game.Seed & 65535).ToString("X4"), 364, 360, 17, PaperInk);
         MenuItemVisual("NEW VIGIL", "ENTER", MenuLayout.End[0], 0);
         MenuItemVisual("RETURN TO TITLE", "", MenuLayout.End[1], 1);
         ContextFooter("W/S SELECT   ENTER CONFIRM");
@@ -665,21 +762,21 @@ public partial class ScreenLayer : Control
                 Box(px, py, 2, 5, C(255, 139, 74, (int)(120 * (1 - t))));
             }
         }
-        Text("THE LONG DUSK BREAKS", 58, 58, 16, Ember);
-        Bold("ONE MORE MORNING", 54, 88, 50, new Color(1, 1, 1));
-        Box(58, 158, 520, 2, C(120, 255, 205, 116));
-        TextWrap("First a red line, then a river. The Cinder leaves Veyra's hands, and the world remembers the sun.", 60, 178, 590, 17, 24, C(235, 226, 214, 230));
+        Text("THE LONG DUSK BREAKS", 58, 58, 16, Gold);
+        Bold("ONE MORE MORNING", 54, 88, 50, Paper);
+        Box(58, 158, 520, 2, A(Gold, 190));
+        TextWrap("First a red line, then a river. The Cinder leaves Veyra's hands, and the world remembers the sun.", 60, 178, 590, 17, 24, Paper);
         string phase = progress < .34f ? "I  THE RED LINE" : progress < .72f ? "II  THE RIVER" : "III  THE MORNING";
         Bold(phase, 60, 276, 24, Gold);
         if (!ReduceMotion)
         {
             float line = 600 - progress * 480;
-            Box(line, horizon - 2, 1280 - line, 3, C(255, 205, 116, (int)(90 + progress * 120)));
+            Box(line, horizon - 2, 1280 - line, 3, A(Gold, (int)(90 + progress * 120)));
         }
-        Box(440, 628, 400, 6, C(44, 228, 222, 208));
+        Box(440, 628, 400, 6, A(PaperInk, 140));
         Box(440, 628, 400 * progress, 6, Gold);
-        Text("WITNESSING THE DAWN", 440, 602, 14, Muted);
-        TextRight("ENTER / ESC / CLICK TO SKIP", 840, 602, 14, Ash);
+        Text("WITNESSING THE DAWN", 440, 602, 14, Paper);
+        TextRight("ENTER / ESC / CLICK TO SKIP", 840, 602, 14, Paper);
     }
 
     void Triangle(float x1, float y1, float x2, float y2, float x3, float y3, Color c)

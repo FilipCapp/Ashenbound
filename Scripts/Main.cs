@@ -14,7 +14,7 @@ public partial class Main : Control
     double previous;
     double accumulator;
     float clock;
-    bool fullscreen;
+    bool fullscreen = true;
 
     public override void _Ready()
     {

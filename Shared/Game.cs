@@ -16,7 +16,7 @@ public class Hazard {
  public RectangleF Bounds;public int Kind;public float Timer;public bool Active;public float Life;
 }
  public class Game {
-   public const float Floor=620,Width=1280,Height=720,EnemyMargin=44f,SunriseDuration=6f;
+   public const float Floor=620,Width=1280,Height=720,EnemyMargin=44f,SunriseDuration=6f,ClearPulseDuration=.9f;
   public const int FireballSound=0,HitSound=1,ClearSound=2,HurtSound=3,DashSound=4,FlaskSound=5;
   public const int MasterVolumeIndex=0,MusicVolumeIndex=1,SfxVolumeIndex=2;
   public Stage State=Stage.Title,HelpReturn=Stage.Title;
@@ -28,7 +28,7 @@ public class Hazard {
  public V Player,Velocity,Aim=new V(1,0);
  public bool Grounded,ExitOpen,Ending;
  public float Health=100,MaxHealth=100,Damage=26,FireRate=.15f,Speed=315;
- public float Invulnerable,DashTime,DashCooldown,FireCooldown,FlaskCooldown;
+  public float Invulnerable,DashTime,DashCooldown,FireCooldown,FlaskCooldown,ClearPulse;
  public float ChainTime,MultiWindow,Shake,Elapsed,RoomTime;
  public int Chain,BestChain,Flasks=3;
   public int Room,Score,Kills,Seed,Pending,UpgradeCount,Difficulty;
@@ -38,7 +38,7 @@ public class Hazard {
  public readonly List<Bullet> Bullets=new List<Bullet>();
  public readonly List<Particle> Particles=new List<Particle>();
  public readonly List<Hazard> Hazards=new List<Hazard>();
-  Rng random=new Rng(1);float spawn;public Action<int> PlaySound;
+   Rng random=new Rng(1);float spawn;public Action<int> PlaySound;
   Rng relicRandom=new Rng(1);
    public readonly RelicKind[] UpgradeChoices=new RelicKind[3];
    public readonly int[] RelicStacks=new int[Campaign.Upgrades.Length];
@@ -78,7 +78,7 @@ public class Hazard {
   Platforms.Clear();Enemies.Clear();Bullets.Clear();Particles.Clear();Hazards.Clear();
   Player=new V(95,Floor-24);Velocity=new V();Aim=new V(1,0);Grounded=true;
   FireCooldown=DashTime=DashCooldown=FlaskCooldown=0;Invulnerable=1.2f;
-  RoomTime=0;ExitOpen=false;Chain=0;ChainTime=0;MultiWindow=0;Shake=0;ToastTime=3;
+   RoomTime=0;ExitOpen=false;ClearPulse=0;Chain=0;ChainTime=0;MultiWindow=0;Shake=0;ToastTime=3;
   Platforms.Add(new RectangleF(0,Floor,Width,30));
   if(Room==0){
    Platforms.Add(new RectangleF(150,480,250,18));
@@ -144,15 +144,32 @@ public class Hazard {
      case RelicKind.Ward:DamageTakenScale=Math.Max(.65f,1f-.2f*RelicStacks[i]);break;
     }
    }
-   public void Hurt(float amount){
-    if(State!=Stage.Playing||Invulnerable>0)return;
+    public void Hurt(float amount){
+     if(State!=Stage.Playing||ExitOpen||Invulnerable>0)return;
     float damage=Math.Max(1,(int)Math.Ceiling(amount*DamageTakenScale*Campaign.Difficulties[Difficulty].IncomingDamage));
     Health=Math.Max(0,Health-damage);Invulnerable=.85f;
   Chain=0;ChainTime=0;MultiWindow=0;Shake=9;
    Burst(Player,Palette.Blood,20);Sound(HurtSound);
   if(Health<=0)State=Stage.Dead;
- }
-  void Sound(int n){if(PlaySound!=null)PlaySound(n);}
+  }
+  public void ClearRoom(){
+   if(ExitOpen)return;
+   ExitOpen=true;Score+=500;ClearPulse=ClearPulseDuration;
+   Shake=Math.Max(Shake,6);
+   Toast="SANCTUM CLEAR / THE GATE IS OPEN";ToastTime=4;Sound(ClearSound);
+  }
+  void PurgeClear(){
+   for(int i=Bullets.Count-1;i>=0;i--){
+    Bullet b=Bullets[i];
+    if(b.Hostile){Burst(b.P,Palette.Cyan,10);Bullets.RemoveAt(i);}
+   }
+   for(int i=Hazards.Count-1;i>=0;i--){
+    Hazard h=Hazards[i];
+    Burst(new V(h.Bounds.Left+h.Bounds.Width/2,h.Bounds.Top+h.Bounds.Height/2),Palette.Cyan,10);
+    Hazards.RemoveAt(i);
+   }
+  }
+   void Sound(int n){if(PlaySound!=null)PlaySound(n);}
   void ShootFireball(V origin,V direction,float damage){
    Bullets.Add(new Bullet{P=origin,Velocity=direction*1000,Life=1.3f,Damage=damage,Kind=0,Pierce=Pierce});
   }
@@ -168,7 +185,7 @@ public class Hazard {
    }
    if(State!=Stage.Playing){Input.ClearEdges();return;}
    dt=Math.Min(dt,.025f);
-  Elapsed+=dt;RoomTime+=dt;ToastTime-=dt;Invulnerable-=dt;
+   Elapsed+=dt;RoomTime+=dt;ToastTime-=dt;Invulnerable-=dt;ClearPulse=Math.Max(0,ClearPulse-dt);
   DashCooldown-=dt;FireCooldown-=dt;FlaskCooldown-=dt;Shake=Math.Max(0,Shake-dt*28);
   ChainTime-=dt;if(ChainTime<=0){Chain=0;ChainTime=0;MultiWindow=0;}
   MultiWindow-=dt;if(MultiWindow<=0)MultiCountReset();
@@ -222,10 +239,8 @@ public class Hazard {
    Particle p=Particles[i];p.Life-=dt;p.P+=p.Velocity*dt;p.Velocity*=1-dt*3;
    if(p.Life<=0)Particles.RemoveAt(i);
   }
-  if(!ExitOpen&&Pending==0&&Enemies.Count==0){
-   ExitOpen=true;Score+=500;Bullets.RemoveAll(delegate(Bullet b){return b.Hostile;});
-   Toast="SANCTUM CLEAR / THE GATE IS OPEN";ToastTime=4;Sound(ClearSound);
-  }
+    if(!ExitOpen&&Pending==0&&Enemies.Count==0)ClearRoom();
+    if(ExitOpen)PurgeClear();
   if(ExitOpen&&Player.X>1150&&Input.Use){
    if(Room==Campaign.TotalRooms-1){Ending=true;State=Stage.Story;}
    else State=Stage.Upgrade;
@@ -308,8 +323,9 @@ public class Hazard {
   MultiWindow=.55f;multiCount++;
   if(multiCount>=2){ChainTime+=1.4f;multiCount=0;}
    Health=Math.Min(MaxHealth,Health+3+HealPerKill);
-  Burst(e.P,e.Kind==3?Palette.Gold:Palette.Ember,32);Shake=4;Sound(1);
- }
+   Burst(e.P,e.Kind==3?Palette.Gold:Palette.Ember,32);Shake=4;Sound(1);
+   if(!ExitOpen&&Pending==0&&Enemies.Count==0)ClearRoom();
+  }
  void Explode(V p,float damage){
   Burst(p,Palette.Ember,30);Shake=7;Sound(1);
   for(int j=Enemies.Count-1;j>=0;j--){
