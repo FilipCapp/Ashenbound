@@ -195,8 +195,14 @@ static class Program {
  [STAThread]
  static int Main(string[] args){
   try{
-   if(args.Length>0&&args[0]=="--self-test")return Tests.Run();
-   Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
+    if(args.Length>0&&args[0]=="--self-test")return Tests.Run();
+    if(args.Length>0&&args[0]=="--audio-diag"){
+     PcmMixer.Diagnostics=true;Audio audio=new Audio();
+     string text="Available="+audio.Available+Environment.NewLine+PcmMixer.DiagnosticText;
+     File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"audio-diag.txt"),text);
+     bool ok=audio.Available;Console.WriteLine(text);audio.Dispose();return ok?0:1;
+    }
+    Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
    Application.Run(new GameWindow());return 0;
   }catch(Exception e){
    File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"crash.log"),e.ToString());

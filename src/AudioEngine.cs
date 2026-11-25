@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 namespace Ashenbound {
  internal static class SoundData {
@@ -144,19 +145,25 @@ namespace Ashenbound {
    [DllImport("ole32.dll")] static extern void CoUninitialize();
    [DllImport("ole32.dll")] static extern int CoCreateInstance(ref Guid clsid,IntPtr outer,uint context,ref Guid iid,out IntPtr instance);
    const uint EventCallback=0x00040000,AutoConvertPcm=0x80000000,SrcDefaultQuality=0x08000000;
-   const uint ClassContextAll=0x00000017,CoInitApartmentThreaded=0x00000002;
+    const uint ClassContextAll=0x00000017,CoInitMultiThreaded=0x00000000;
+    const int RpcEChangedMode=unchecked((int)0x80010106);
    const int DataFlowRender=0,RoleMultimedia=1,ShareModeShared=0;
    const long BufferDuration=200000;
    const int BufferSamples=512;
 
-   readonly object sync=new object();readonly List<Voice> voices=new List<Voice>();
+    internal static bool Diagnostics;
+    static readonly StringBuilder DiagnosticLog=new StringBuilder();
+    internal static string DiagnosticText{get{lock(DiagnosticLog)return DiagnosticLog.ToString();}}
+    static void Diag(string message){if(Diagnostics)lock(DiagnosticLog)DiagnosticLog.AppendLine(message);}
+    static int Hr(string name,int result){Diag(name+" 0x"+result.ToString("X8"));return result;}
+    readonly object sync=new object();readonly List<Voice> voices=new List<Voice>();
    readonly AutoResetEvent ready=new AutoResetEvent(false);readonly ManualResetEvent stop=new ManualResetEvent(false);
    readonly ManualResetEvent initialized=new ManualResetEvent(false);readonly WaitHandle[] waits;
    float[] frame=new float[BufferSamples];byte[] renderBytes;Thread thread;
    IMMDeviceEnumerator enumerator;IMMDevice endpoint;IAudioClient audioClient;IAudioRenderClient renderClient;
    volatile bool running,available;
    bool musicPlaying,muted,disposed,comInitialized,comMustUninitialize;
-   int bufferFrames,position,fromTrack=-1,toTrack=-1,fade,fadeLength;
+    int bufferFrames,position,fromTrack=-1,toTrack=-1,fade,fadeLength,renderDiagCount;
    float master=1,musicVolume=.8f,sfxVolume=1;
     struct Voice {public int Effect;public int Position;public int Room;}
     public PcmMixer():this(true){}
@@ -241,74 +248,93 @@ namespace Ashenbound {
     thread=new Thread(Run);thread.IsBackground=true;
     running=true;thread.Start();initialized.WaitOne();
    }
-   bool InitializeAudio(){
-    int result=CoInitializeEx(IntPtr.Zero,CoInitApartmentThreaded);
-    if(result<0)return false;
-    comInitialized=true;comMustUninitialize=result==0;
-    Guid clsid=new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E");
-    Guid iidEnumerator=new Guid("A95664D2-9614-4F35-A746-DE8DB63617E6");
-    IntPtr raw=IntPtr.Zero;
-    if(CoCreateInstance(ref clsid,IntPtr.Zero,ClassContextAll,ref iidEnumerator,out raw)<0||raw==IntPtr.Zero)return false;
-    try{enumerator=(IMMDeviceEnumerator)Marshal.GetTypedObjectForIUnknown(raw,typeof(IMMDeviceEnumerator));}
-    finally{if(raw!=IntPtr.Zero)Marshal.Release(raw);}
-    if(enumerator==null)return false;
-    if(enumerator.GetDefaultAudioEndpoint(DataFlowRender,RoleMultimedia,out endpoint)<0||endpoint==null)return false;
-    Guid iidClient=new Guid("1CB9AD4C-DBFA-4C32-B178-C2F568A703B2");
-    WaveFormatEx format=new WaveFormatEx();
-    format.FormatTag=1;format.Channels=1;format.SamplesPerSecond=SoundData.Rate;
-    format.AverageBytesPerSecond=(uint)(SoundData.Rate*2);format.BlockAlign=2;format.BitsPerSample=16;format.Size=0;
-    uint[] attempts=new uint[]{EventCallback|AutoConvertPcm|SrcDefaultQuality,EventCallback|AutoConvertPcm,EventCallback};
-    for(int i=0;i<attempts.Length;i++){
-     IAudioClient attempt=null;
-     if(endpoint.Activate(ref iidClient,ClassContextAll,IntPtr.Zero,out attempt)<0||attempt==null)continue;
-     if(attempt.Initialize(ShareModeShared,attempts[i],BufferDuration,0,ref format,IntPtr.Zero)<0){ReleaseCom(attempt);continue;}
-     audioClient=attempt;break;
+    bool InitializeAudio(){
+     int result=Hr("CoInitializeEx",CoInitializeEx(IntPtr.Zero,CoInitMultiThreaded));
+     if(result<0&&result!=RpcEChangedMode)return false;
+     if(result==RpcEChangedMode)Diag("CoInitializeEx already initialized on this thread");
+     comInitialized=true;comMustUninitialize=result==0;
+     Guid clsid=new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E");
+     Guid iidEnumerator=new Guid("A95664D2-9614-4F35-A746-DE8DB63617E6");
+     IntPtr raw=IntPtr.Zero;
+     result=Hr("CoCreateInstance",CoCreateInstance(ref clsid,IntPtr.Zero,ClassContextAll,ref iidEnumerator,out raw));
+     if(result<0||raw==IntPtr.Zero)return false;
+     try{enumerator=(IMMDeviceEnumerator)Marshal.GetTypedObjectForIUnknown(raw,typeof(IMMDeviceEnumerator));}
+     finally{if(raw!=IntPtr.Zero)Marshal.Release(raw);}
+     if(enumerator==null){Diag("GetTypedObjectForIUnknown null");return false;}
+     result=Hr("GetDefaultAudioEndpoint",enumerator.GetDefaultAudioEndpoint(DataFlowRender,RoleMultimedia,out endpoint));
+     if(result<0||endpoint==null)return false;
+     Guid iidClient=new Guid("1CB9AD4C-DBFA-4C32-B178-C2F568A703B2");
+     WaveFormatEx format=new WaveFormatEx();
+     format.FormatTag=1;format.Channels=1;format.SamplesPerSecond=SoundData.Rate;
+     format.AverageBytesPerSecond=(uint)(SoundData.Rate*2);format.BlockAlign=2;format.BitsPerSample=16;format.Size=0;
+     Diag("WaveFormatBytes "+WaveFormatBytes+" channels "+format.Channels+" rate "+format.SamplesPerSecond);
+     uint[] attempts=new uint[]{EventCallback|AutoConvertPcm|SrcDefaultQuality,EventCallback|AutoConvertPcm,EventCallback};
+     for(int i=0;i<attempts.Length;i++){
+      IAudioClient attempt=null;
+      result=Hr("Activate["+i+"]",endpoint.Activate(ref iidClient,ClassContextAll,IntPtr.Zero,out attempt));
+      if(result<0||attempt==null)continue;
+      result=Hr("Initialize["+i+"] flags=0x"+attempts[i].ToString("X8"),attempt.Initialize(ShareModeShared,attempts[i],BufferDuration,0,ref format,IntPtr.Zero));
+      if(result<0){ReleaseCom(attempt);continue;}
+      audioClient=attempt;break;
+     }
+     if(audioClient==null){Diag("No usable IAudioClient");return false;}
+     uint frames;
+     result=Hr("GetBufferSize",audioClient.GetBufferSize(out frames));
+     if(result<0||frames==0)return false;
+     result=Hr("SetEventHandle",audioClient.SetEventHandle(ready.SafeWaitHandle.DangerousGetHandle()));
+     if(result<0)return false;
+     Guid iidRender=new Guid("F294ACFC-3146-4483-A7BF-ADDCA7C260E2");
+     result=Hr("GetService",audioClient.GetService(ref iidRender,out renderClient));
+     if(result<0||renderClient==null)return false;
+     bufferFrames=(int)frames;
+     Diag("bufferFrames "+bufferFrames);
+     frame=new float[bufferFrames];renderBytes=new byte[bufferFrames*2];
+     if(!RenderBuffer(bufferFrames)){Diag("Prefill RenderBuffer failed");return false;}
+     result=Hr("Start",audioClient.Start());
+     if(result<0)return false;
+     available=true;
+     Diag("available true");
+     return true;
     }
-    if(audioClient==null)return false;
-    uint frames;
-    if(audioClient.GetBufferSize(out frames)<0||frames==0)return false;
-    if(audioClient.SetEventHandle(ready.SafeWaitHandle.DangerousGetHandle())<0)return false;
-    Guid iidRender=new Guid("F294ACFC-3146-4483-A7BF-ADDCA7C260E2");
-    if(audioClient.GetService(ref iidRender,out renderClient)<0||renderClient==null)return false;
-    bufferFrames=(int)frames;
-    frame=new float[bufferFrames];renderBytes=new byte[bufferFrames*2];
-    if(!RenderBuffer(bufferFrames))return false;
-    if(audioClient.Start()<0)return false;
-    available=true;
-    return true;
-   }
-   void Run(){
-    bool ok=false;
-    try{ok=InitializeAudio();}catch{}
-    initialized.Set();
-    if(ok){try{Loop();}catch{}}
-    Cleanup();
-   }
-   void Loop(){
-    while(running){
-     if(WaitHandle.WaitAny(waits)==1)break;
-     if(audioClient==null||renderClient==null)break;
-     uint padding;
-     if(audioClient.GetCurrentPadding(out padding)<0)continue;
-     int count=bufferFrames-(int)padding;
-     if(count<=0)continue;
-     if(count>bufferFrames)count=bufferFrames;
-     RenderBuffer(count);
+    void Run(){
+     bool ok=false;
+     try{ok=InitializeAudio();}
+     catch(Exception e){Diag("InitializeAudio exception "+e);}
+     initialized.Set();
+     if(ok){try{Loop();}catch(Exception e){Diag("Loop exception "+e);}}
+     Cleanup();
     }
-   }
-   bool RenderBuffer(int frames){
-    if(frames<=0||frames>bufferFrames||renderClient==null||renderBytes==null||frame==null)return false;
-    IntPtr data;
-    if(renderClient.GetBuffer((uint)frames,out data)<0||data==IntPtr.Zero)return false;
-    Mix(frame,frames);
-    int bytes=frames*2;
-    for(int i=0;i<frames;i++){
-     short sample=(short)(frame[i]*32767);
-     renderBytes[i*2]=(byte)(sample&255);renderBytes[i*2+1]=(byte)((sample>>8)&255);
+    void Loop(){
+     int errors=0;
+     while(running){
+      if(WaitHandle.WaitAny(waits)==1)break;
+      if(audioClient==null||renderClient==null)break;
+      uint padding;
+      int result=audioClient.GetCurrentPadding(out padding);
+      if(result<0){if(errors++<16)Hr("GetCurrentPadding loop",result);continue;}
+      int count=bufferFrames-(int)padding;
+      if(count<=0)continue;
+      if(count>bufferFrames)count=bufferFrames;
+      if(!RenderBuffer(count)&&errors++<16)Diag("RenderBuffer loop failed frames="+count);
+     }
     }
-    Marshal.Copy(renderBytes,0,data,bytes);
-    return renderClient.ReleaseBuffer((uint)frames,0)>=0;
-   }
+    bool RenderBuffer(int frames){
+     if(frames<=0||frames>bufferFrames||renderClient==null||renderBytes==null||frame==null)return false;
+     IntPtr data=IntPtr.Zero;
+     int result=renderClient.GetBuffer((uint)frames,out data);
+     if(Diagnostics&&renderDiagCount++<8)Hr("GetBuffer",result);
+     if(result<0||data==IntPtr.Zero)return false;
+     Mix(frame,frames);
+     int bytes=frames*2;
+     for(int i=0;i<frames;i++){
+      short sample=(short)(frame[i]*32767);
+      renderBytes[i*2]=(byte)(sample&255);renderBytes[i*2+1]=(byte)((sample>>8)&255);
+     }
+     Marshal.Copy(renderBytes,0,data,bytes);
+     result=renderClient.ReleaseBuffer((uint)frames,0);
+     if(Diagnostics&&renderDiagCount<8)Hr("ReleaseBuffer",result);
+     return result>=0;
+    }
    static void ReleaseCom(object value){
     if(value==null)return;
     try{Marshal.ReleaseComObject(value);}catch{}
